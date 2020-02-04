@@ -1,10 +1,11 @@
 # OpenPrediction
 Machine learning applied to quotations prediction
 
-## UNDER ACTIVE DEVELOPMENT
+### UNDER ACTIVE DEVELOPMENT
 
 
-# Description
+
+## Description
 The project aims to provide a machine learning API which is predicting the future quotation prices.
 
 The API will work on a local server mode and provides REST capabilities to other applications like Excel.
