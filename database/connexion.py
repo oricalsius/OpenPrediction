@@ -1,7 +1,10 @@
-from .model import (Quotation, Indicators, get_base)
+from .model import get_base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from . import _DATABASE_STRING
+from pathlib import Path
+
+_DATABASE_PATH = str(Path(__file__).parent.absolute())
+_DATABASE_STRING = 'sqlite:///' + _DATABASE_PATH + "/db.indicators.db"
 
 
 class DbConnexion:
@@ -10,7 +13,7 @@ class DbConnexion:
     database
     """
 
-    def __init__(self, db_path:str = None, drop_all: bool = True, create_all: bool = True, echo: bool = False):
+    def __init__(self, db_path: str = None, drop_all: bool = True, create_all: bool = True, echo: bool = False):
         if db_path is not None and db_path.strip() != "":
             self._DATABASE_STRING = db_path
         else:

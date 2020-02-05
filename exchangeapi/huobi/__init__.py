@@ -1,5 +1,6 @@
+from abc import ABC, abstractmethod
 
-class HuobiAPI:
+class HuobiAPI(ABC):
     """Represent the basic abstract class from which Rest and WebSocket Huobi API should inherit"""
 
     _URL = "{0}://api.huobi.pro{1}"
@@ -10,6 +11,7 @@ class HuobiAPI:
     _URL_MARKET_DATA = "/market/"
     _URL_REFERENCE = "/v2/reference/"
 
+    @abstractmethod
     def __init__(self, access_key: str = "", secret_key: str = "", use_aws: bool = False, is_socket: bool = False):
         self._is_websocket = is_socket
         self._use_aws = use_aws

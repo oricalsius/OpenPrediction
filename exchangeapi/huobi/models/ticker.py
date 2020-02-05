@@ -16,6 +16,11 @@ class Ticker:
 
 
 class TickerSchema(Schema):
+    """
+    Define marshmallow schema for Ticker object
+    This schema will serialize from received json to Ticker type
+    """
+
     timestamp = fields.Int(data_key="id")
     amount = fields.Float()
     count = fields.Integer()
@@ -45,6 +50,11 @@ class TickerAggregated(Ticker):
 
 
 class TickerAggregatedSchema(Schema):
+    """
+    Define marshmallow schema for TickerAggregated object
+    This schema will serialize from received json to TickerAggregated type
+    """
+
     timestamp = fields.Int(data_key="ts")
     open = fields.Float()
     close = fields.Float()

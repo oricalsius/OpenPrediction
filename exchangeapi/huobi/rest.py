@@ -5,7 +5,7 @@ The requirements have been gathered from Huobi API documentation: https://huobia
 
 from . import HuobiAPI
 from exchangeapi.huobi.models.enumerations import TickerPeriod
-from exchangeapi.huobi.utils import (get_json_key, check_str, check_range)
+from exchangeapi.huobi.utils import (get_json_key, check_str, check_range, parse_json_to_object)
 from urllib.parse import (urlparse, urlunparse, urlencode, parse_qs)
 import json
 import aiohttp
@@ -58,7 +58,7 @@ class Rest(HuobiAPI):
                 return json_body
 
     async def get_ticker_history(self, symbol: str, period: TickerPeriod, size: int = 1, schema: object = None,
-                                 **kwargs_schema) -> int:
+                                 **kwargs_schema: dict) -> int:
         """
         Retrieves all klines in a specific range.
 
@@ -79,11 +79,5 @@ class Rest(HuobiAPI):
         uri = self._format_uri(super()._URL_MARKET_DATA + "history/kline")
 
         root_json = await self._http_get_request(uri, parameters)
-        json_object = get_json_key(root_json, "data")
-
-        if schema is None:
-            return json_object
-        else:
-            res = schema.load(json_object, **kwargs_schema)
-            return res
+        return parse_json_to_object(get_json_key(root_json, "data"), schema, **kwargs_schema)
 
