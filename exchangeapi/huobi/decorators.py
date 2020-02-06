@@ -1,5 +1,4 @@
 """Module to define decorators and validators"""
-from typing import List
 from marshmallow import Schema
 
 

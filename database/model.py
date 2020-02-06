@@ -42,6 +42,7 @@ class Quotation(_Base):
     __tablename__ = "quotations"
 
     timestamp = Column(BigInteger, primary_key=True)
+    amount = Column(Float)
     open = Column(Float)
     close = Column(Float)
     low = Column(Float)
@@ -50,9 +51,10 @@ class Quotation(_Base):
 
     indicators = relationship("Indicator", uselist=True, back_populates="quotation")
 
-    def __init__(self, timestamp: int, open: float, close: float, low: float, high: float,
+    def __init__(self, timestamp: int, amount: float, open: float, close: float, low: float, high: float,
                  vol: float, c_indicators: List[Indicator] = list()):
         self.timestamp = timestamp
+        self.amount = amount
         self.open = open
         self.close = close
         self.low = low
@@ -81,7 +83,7 @@ class QuotationsSchema(Schema):
         return Quotation(**data)
 
     class Meta:
-        exclude = ["amount", "count"]
+        exclude = ["count"]
 
 
 

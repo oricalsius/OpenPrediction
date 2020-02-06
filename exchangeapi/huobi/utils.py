@@ -12,7 +12,10 @@ def parse_json_to_object(json: dict, schema: object = None, **kwargs_schema: dic
 
 def get_json_key(json: dict, json_path: str = "data"):
     if json.get('status', "") != "ok":
-        raise Exception(f"{sys._getframe(1).f_code.co_name}: Wrong response status '{json.get('status', None)}'.")
+        if "err-msg" in json:
+            raise Exception(f"{sys._getframe(1).f_code.co_name}: Wrong response status '{json.get('err-msg', None)}'.")
+        else:
+            raise Exception(f"{sys._getframe(1).f_code.co_name}: Wrong response status '{json.get('status', None)}'.")
 
     if json_path not in json:
         raise Exception(f"{sys._getframe(1).f_code.co_name}: Key {json_path} not found in response json.")

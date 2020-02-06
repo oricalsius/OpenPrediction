@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 
+
 class HuobiAPI(ABC):
     """Represent the basic abstract class from which Rest and WebSocket Huobi API should inherit"""
 

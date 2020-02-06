@@ -8,42 +8,42 @@ import pandas as pd
 import numpy as np
 
 
-def average_directional_index():
-    pass
+def average_directional_index(data: pd.DataFrame) -> pd.DataFrame:
+    return data
 
 
-def average_true_range():
-    pass
+def average_true_range(data: pd.DataFrame) -> pd.DataFrame:
+    return data
 
 
-def moving_average(df: pd.DataFrame, columns: List[str], length: int = 20):
-    pass
+def moving_average(data: pd.DataFrame, column: str, length: int = 20, name="", add_to_data=False) -> pd.DataFrame:
+    return data
 
 
-def moving_average_channel():
-    pass
+def moving_average_channel(data: pd.DataFrame) -> pd.DataFrame:
+    return data
 
 
-def moving_average_weighted():
-    pass
+def moving_average_weighted(data: pd.DataFrame) -> pd.DataFrame:
+    return data
 
 
-def moving_average_exponential():
-    pass
+def moving_average_exponential(data: pd.DataFrame) -> pd.DataFrame:
+    return data
 
 
-def hull_moving_average():
-    pass
+def hull_moving_average(data: pd.DataFrame) -> pd.DataFrame:
+    return data
 
 
-def smoothed_moving_average():
-    pass
+def smoothed_moving_average(data: pd.DataFrame) -> pd.DataFrame:
+    return data
 
 
-def arnaud_legoux_moving_average():
-    pass
+def arnaud_legoux_moving_average(data: pd.DataFrame) -> pd.DataFrame:
+    return data
 
 
-def least_squares_moving_average():
-    pass
+def least_squares_moving_average(data: pd.DataFrame) -> pd.DataFrame:
+    return data
 
