@@ -1,11 +1,14 @@
 """Module to define decorators and validators"""
 from typing import List
+from pandas import core, DataFrame
 import sys
 
 
 def parse_json_to_object(json: dict, schema: object = None, **kwargs_schema: dict):
     if schema is None:
         return json
+    elif schema is core.frame.DataFrame:
+        return DataFrame(json)
     else:
         return schema.load(json, **kwargs_schema)
 

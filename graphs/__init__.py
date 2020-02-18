@@ -1,10 +1,10 @@
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from typing import List, Dict
-import pandas as pd
+from typing import List
+from pandas import DataFrame, Series
 
 
-def display_graph(data_to_display: pd.DataFrame, data_index: pd.Series, open: str, close: str,
+def display_graph(data_to_display: DataFrame, data_index: Series, open: str, close: str,
                   high: str, low: str, scatters_plot: dict = {}, sub_plots: List[dict] = []):
 
     empty_parameters = [key for key, value in
@@ -25,7 +25,7 @@ def display_graph(data_to_display: pd.DataFrame, data_index: pd.Series, open: st
 
     # Add other scatters plots in the main graph
     for label, column_name in scatters_plot.items():
-        fig.add_scatter(x=data_index, y=data_to_display[column_name], mode='lines', name=label, row=1, col=1)
+        fig.add_scatter(x=data_index, y=data_to_display[column_name].shift(1), mode='lines', name=label, row=1, col=1)
 
     # Add subplots
     for i, plot in enumerate(sub_plots):

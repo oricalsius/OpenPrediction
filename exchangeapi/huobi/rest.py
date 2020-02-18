@@ -8,6 +8,7 @@ from exchangeapi.huobi.models.enumerations import TickerPeriod
 from exchangeapi.huobi.utils import (get_json_key, check_str, check_range, parse_json_to_object)
 from urllib.parse import (urlparse, urlunparse, urlencode, parse_qs)
 import json
+import asyncio
 import aiohttp
 
 
@@ -57,16 +58,18 @@ class Rest(HuobiAPI):
                     raise Exception(f"Error while requesting data from the server. Response status: {resp.status}")
                 return json_body
 
-    async def get_ticker_history(self, symbol: str, period: TickerPeriod, size: int = 1, schema: object = None,
-                                 **kwargs_schema: dict) -> int:
+    async def get_ticker_history_async(self, symbol: str, period: TickerPeriod, size: int = 1, schema: object = None,
+                                       **kwargs_schema: dict) -> object:
         """
         Retrieves all klines in a specific range.
+
+        Async version.
 
         Implements end point https://api.huobi.pro/market/history/kline
 
         :param str symbol: The trading symbol to query.
         :param TickerPeriod period: The period of each candle.
-        :param int size: The number of data returns in range [0, 2000]
+        :param int size: The number of data returned in range [0, 2000]
         :param object schema: Schema to apply to parse json. (str, dict, MarshmallowSchema)
         :param dict kwargs_schema: Key word arguments to pass to schema.
         :return: Last n tickers for a specific period parsed to schema
@@ -81,3 +84,7 @@ class Rest(HuobiAPI):
         root_json = await self._http_get_request(uri, parameters)
         return parse_json_to_object(get_json_key(root_json, "data"), schema, **kwargs_schema)
 
+    def get_ticker_history(self, symbol: str, period: TickerPeriod, size: int = 1, schema: object = None,
+                           **kwargs_schema: dict) -> object:
+
+        return asyncio.run(self.get_ticker_history_async(symbol, period, size, schema, **kwargs_schema))
