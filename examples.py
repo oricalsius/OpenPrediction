@@ -13,13 +13,14 @@ import numpy as np
 api_huobi_rest = Rest("", "", False)
 
 
-def get_data_example() -> pd.DataFrame:
+def get_data_example(dropna: bool = True) -> pd.DataFrame:
     """
     Function to compute and preprocess DataFrame indicators, then transform prices to returns
 
     This example shows how to use Pandas built-in functions for the DataFrame.
 
     :param data: All data imported from exchange in form of DataFrame.
+    :param dropna: All data imported from exchange in form of DataFrame.
     :return: The computed and then preprocessed indicators DataFrame.
     """
 
@@ -51,6 +52,9 @@ def get_data_example() -> pd.DataFrame:
     data["tr_avg_14_raise_velocity"] = data[["tr_avg_14", "amount"]].apply(lambda x: x["tr_avg_14"] / x["amount"],
                                                                            axis=1)
 
+    if dropna:
+        data.dropna(inplace=True)
+
     return data
 
 
@@ -63,7 +67,6 @@ def preprocess_indicators(indicator_object: Indicators):
     """
 
     preprocessing_object = indicator_object.preprocessing
-    src_columns = []
     drop_columns = []
 
     # Compute log returns and normal returns for i+1 to i+14
@@ -93,7 +96,7 @@ def preprocess_indicators(indicator_object: Indicators):
                                                      result_names=["ex_" + x for x in target_columns_names])
 
     # Compute log division for all columns for which it is meaningful to know how much they deviate from source prices.
-    right_columns = []
+    right_columns, src_columns = [], []
     for x in ["open", "close", "high", "low"]:
         src_columns.extend(
             [prefix + "machannel_14_3_" + x + suffix for suffix in {"_AVG", "_UP", "_DOWN"} for prefix in {"", "ex_"}])

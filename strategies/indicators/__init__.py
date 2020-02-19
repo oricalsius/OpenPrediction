@@ -4,7 +4,7 @@ This module is defining all the functions that are necessary to create indicator
 
 from typing import List, Union, Any, Dict
 from .utils import _get_columns
-from .preprocessing import ProcessingIndicators
+from .processing import ProcessingIndicators
 import pandas as pd
 import numpy as np
 
