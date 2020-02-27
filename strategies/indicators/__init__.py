@@ -2,9 +2,10 @@
 This module is defining all the functions that are necessary to create indicators.
 """
 
-from typing import List, Union, Any, Dict
+from typing import List, Union, Any, Dict, Tuple
 from .utils import _get_columns
 from .processing import ProcessingIndicators
+from scipy.stats import norminvgauss, norm
 import pandas as pd
 import numpy as np
 
@@ -34,9 +35,11 @@ class Indicators(ProcessingIndicators):
         raise Exception("Read only objects cannot be assigned a variable.")
 
     def set_index(self, index_column_name: str, new_index_name: str = None, ascending_order: bool = True,
-                  is_timestamp: bool = False, unit: str = 's') -> pd.DataFrame:
+                  is_timestamp: bool = False, unit: str = 's', drop_duplicates: bool = True) -> pd.DataFrame:
         """
         Take a DataFrame as entry and set the column timestamp_column_name as index.
+
+        It also removes duplicate lines.
 
         :param pandas.DataFrame data: The data in form of pandas.DataFrame.
         :param str index_column_name: Name of the index column.
@@ -46,6 +49,9 @@ class Indicators(ProcessingIndicators):
         :param str unit: Used only when is_timestamp is true.
         """
 
+        if self.data.index.name == index_column_name:
+            self.data.reset_index(inplace=True)
+
         if index_column_name not in set(self.data.columns):
             raise Exception(f"Column {index_column_name} is not in the DataFrame.")
 
@@ -54,13 +60,66 @@ class Indicators(ProcessingIndicators):
             self.data.rename(columns={index_column_name: new_index_name}, inplace=True)
             column_name = new_index_name
 
+        if drop_duplicates:
+            self.data.drop_duplicates(subset=column_name, keep="first", inplace=True)
+
         if is_timestamp:
             self.data[column_name] = pd.to_datetime(self.data[column_name], infer_datetime_format=True, unit=unit)
 
-        self.data.set_index(column_name, inplace=True)
+        if self.data.index.name != column_name:
+            self.data.set_index(column_name, inplace=True)
+
         self.data.sort_index(ascending=ascending_order, inplace=True)
 
         return self.data
+
+    @staticmethod
+    def nig_variates(a: float, b: float, loc: float = 0, scale: float = 1, size: int = 1,
+                     random_state: int = None) -> np.ndarray:
+        """
+        A Normal Inverse Gaussian continuous random variable.
+
+        https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.norminvgauss.html
+        """
+
+        return norminvgauss.rvs(a=a, b=b, loc=loc, scale=scale, size=size, random_state=random_state)
+
+    @staticmethod
+    def nig_fit(data: List, floc: float = None, fscale: float = None) -> Tuple[float, float, float, float]:
+        """
+        Fit data to a Normal Inverse Gaussian continuous random distribution.
+        """
+
+        kwargs = {}
+        if floc is not None:
+            kwargs['floc': floc]
+
+        if fscale is not None:
+            kwargs['fscale': fscale]
+
+        a, b, loc, scale = norminvgauss.fit(data, **kwargs)
+
+        return a, b, loc, scale
+
+    @staticmethod
+    def normal_variates(mean: float = 0, std: float = 1, size: int = 1, random_state: int = None) -> np.ndarray:
+        """
+        A normal continuous random variable.
+
+        https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.norm.html
+        """
+
+        return norm.rvs(loc=mean, scale=std, size=size, random_state=random_state)
+
+    @staticmethod
+    def normal_fit(data: List) -> Tuple[float, float]:
+        """
+        Fit data to a normal continuous random distribution.
+        """
+
+        mean, std = norm.fit(data)
+
+        return mean, std
 
     @staticmethod
     def moving_window_functions(data: pd.DataFrame, columns: Union[List[str], str],

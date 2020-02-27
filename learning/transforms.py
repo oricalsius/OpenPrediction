@@ -6,14 +6,14 @@ import pandas as pd
 #import numpy as np
 
 
-class DataPreProcessing:
+class Normalization:
     """
     Class to preprocess data before input them in the machine learning algorithm
     """
 
     def __init__(self, model_to_load: str = ""):
         """
-        Initialize DataPreProcessing object.
+        Initialize Normalization object.
         :param model_to_load: A saved file path to load to initialize the model.
         """
 
@@ -137,6 +137,8 @@ class DataPreProcessing:
         """
         Apply each scaling step from self._normalization_steps to data.
 
+        Apply pca reduction also if defined.
+
         :param data: Input data to fit the model.
         :return:
         """
@@ -154,17 +156,27 @@ class DataPreProcessing:
                 df.index = data.index
                 transformed_data = df
 
+        if self._pca:
+            transformed_data = pd.DataFrame(self.pca_reduction_transform(transformed_data))
+            transformed_data.index = data.index
+
         return transformed_data
 
     def inverse_transform(self, transformed_data: object):
         """
         Apply the inverse of each scaling step from self._normalization_steps to data.
 
+        Apply the inverse of pca reduction also if defined.
+
         :param transformed_data: Input transform to inverse.
         :return:
         """
 
         inversed_data = transformed_data.copy()
+
+        if self._pca:
+            inversed_data = pd.DataFrame(self.pca_reduction_inverse_transform(inversed_data))
+            inversed_data.index = transformed_data.index
 
         for scale, columns_to_scale in reversed(self._normalization_steps):
             if columns_to_scale:

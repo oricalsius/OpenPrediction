@@ -25,7 +25,7 @@ def display_graph(data_to_display: DataFrame, data_index: Series, open: str, clo
 
     # Add other scatters plots in the main graph
     for label, column_name in scatters_plot.items():
-        fig.add_scatter(x=data_index, y=data_to_display[column_name].shift(1), mode='lines', name=label, row=1, col=1)
+        fig.add_scatter(x=data_index, y=data_to_display[column_name], mode='lines', name=label, row=1, col=1)
 
     # Add subplots
     for i, plot in enumerate(sub_plots):
@@ -33,6 +33,7 @@ def display_graph(data_to_display: DataFrame, data_index: Series, open: str, clo
             fig.add_scatter(x=data_index, y=data_to_display[column_name], mode='lines', name=label, row=i + 5, col=1)
 
     #fig.update_layout(xaxis_rangeslider_visible=False)
+    #fig.update_layout(autosize=True)
 
     fig.show()
 

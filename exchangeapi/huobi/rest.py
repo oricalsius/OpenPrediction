@@ -9,6 +9,7 @@ from exchangeapi.huobi.utils import (get_json_key, check_str, check_range, parse
 from urllib.parse import (urlparse, urlunparse, urlencode, parse_qs)
 import json
 import asyncio
+import datetime
 import aiohttp
 
 
@@ -36,9 +37,10 @@ class Rest(HuobiAPI):
         #self.session.close()
         pass
 
-    def _format_uri(self, url: str, parameters: dict = None) -> str:
+    def _format_uri(self, url: str, parameters: dict = None, global_uri: str = None) -> str:
         # Parse url and add the netloc part
-        parsed_url = list(urlparse(super().global_uri))
+        global_uri = super().global_uri if (global_uri is None) or (global_uri == '') else global_uri
+        parsed_url = list(urlparse(global_uri))
         parsed_url[2] = url
 
         if parameters is not None:
@@ -59,7 +61,7 @@ class Rest(HuobiAPI):
                 return json_body
 
     async def get_ticker_history_async(self, symbol: str, period: TickerPeriod, size: int = 1, schema: object = None,
-                                       **kwargs_schema: dict) -> object:
+                                       kwargs_schema: dict = dict()) -> object:
         """
         Retrieves all klines in a specific range.
 
@@ -85,6 +87,55 @@ class Rest(HuobiAPI):
         return parse_json_to_object(get_json_key(root_json, "data"), schema, **kwargs_schema)
 
     def get_ticker_history(self, symbol: str, period: TickerPeriod, size: int = 1, schema: object = None,
-                           **kwargs_schema: dict) -> object:
+                           kwargs_schema: dict = dict()) -> object:
 
-        return asyncio.run(self.get_ticker_history_async(symbol, period, size, schema, **kwargs_schema))
+        return asyncio.run(self.get_ticker_history_async(symbol, period, size, schema, kwargs_schema))
+
+    # Temporary, will be improved to respect a best coding principle
+    async def get_ticker_history_cryptocompare_async(self, fsym: str, tsym: str, api_key: str, to_date: str = None,
+                                                     schema: object = None, kwargs_schema: dict = dict()) -> object:
+
+        check_str("symbol", fsym)
+        check_str("tsym", fsym)
+        check_str("api_key", fsym)
+
+        uri = self._format_uri("data/v2/histohour", global_uri="https://min-api.cryptocompare.com/")
+        res = []
+
+        # Compute initial toTs
+        if to_date is None:
+            to_date = datetime.datetime.now()
+        else:
+            to_date = datetime.datetime.strptime(to_date, "%Y-%m-%d")
+
+        from_date = datetime.datetime.now()
+        toTs = int(from_date.timestamp())
+        diff = from_date - to_date
+        days, seconds = diff.days, diff.seconds
+        diff = days * 24 + seconds // 3600
+        while diff >= 1:
+            limit = min(int(diff), 2000)
+
+            parameters = {"fsym": fsym, "tsym": tsym, "e": "HuobiPro", "toTs": toTs, "limit": limit,
+                          "api_key": api_key}
+
+            root_json = await self._http_get_request(uri, parameters)
+            data = get_json_key(root_json, "$.Data.Data")
+            res.extend(data)
+
+            #from_date = int((from_date - datetime.timedelta(hours=limit)).timestamp())
+            from_date = datetime.datetime.fromtimestamp(data[0]["time"])
+            toTs = int(from_date.timestamp())
+            diff = from_date - to_date
+            days, seconds = diff.days, diff.seconds
+            diff = days * 24 + seconds // 3600
+
+        return parse_json_to_object(res, schema, **kwargs_schema)
+
+    def get_ticker_history_cryptocompare(self, fsym: str, tsym: str, api_key: str, to_date: str = None,
+                                             schema: object = None, kwargs_schema: dict = dict()) -> object:
+
+        return asyncio.run(self.get_ticker_history_cryptocompare_async(fsym, tsym, api_key, to_date, schema,
+                                                                       kwargs_schema))
+
+

@@ -1,6 +1,7 @@
 """Module to define decorators and validators"""
 from typing import List
 from pandas import core, DataFrame
+from jsonpath_ng import parse
 import sys
 
 
@@ -14,16 +15,18 @@ def parse_json_to_object(json: dict, schema: object = None, **kwargs_schema: dic
 
 
 def get_json_key(json: dict, json_path: str = "data"):
-    if json.get('status', "") != "ok":
+    if json.get('status', "") != "ok" and json.get('Response', "") != "Success":
         if "err-msg" in json:
             raise Exception(f"{sys._getframe(1).f_code.co_name}: Wrong response status '{json.get('err-msg', None)}'.")
         else:
             raise Exception(f"{sys._getframe(1).f_code.co_name}: Wrong response status '{json.get('status', None)}'.")
 
-    if json_path not in json:
+    exp = parse(json_path)
+    res = exp.find(json)
+    if not res:
         raise Exception(f"{sys._getframe(1).f_code.co_name}: Key {json_path} not found in response json.")
 
-    return json[json_path]
+    return res.pop().value
 
 
 def check_range(field_name: str, value: int, rng: List[int]):

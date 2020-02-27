@@ -6,5 +6,6 @@ setup(
     packages=["api", "database", "exchangeapi", "exchangeapi.huobi", "exchangeapi.huobi.models",
               "exchangeapi.huobi.unittests", "strategies", "strategies.indicators"],
 
-    install_requires=['requests', 'aiohttp', 'asyncio', 'pandas', 'numpy', 'marshmallow', 'sqlalchemy', 'plotly']
+    install_requires=['requests', 'aiohttp', 'asyncio', 'pandas', 'numpy', 'marshmallow', 'sqlalchemy', 'plotly',
+                      'joblib']
 )
