@@ -1,11 +1,8 @@
-from examples import get_data_example, normalize_fit_data, restore_y
 from exchangeapi.huobi.models.enumerations import TickerPeriod
-from learning.transforms import Normalization
 from learning import MultiLayerPerceptronNN
 from graphs import display_graph
 from exchangeapi.huobi.rest import Rest
 from architect import MLArchitect
-import numpy as np
 import pandas as pd
 import os
 
@@ -34,7 +31,7 @@ if __name__ == "__main__":
     window = 4; verbose = True; early_stop = True; load_model = False; save_models = True
 
     # Define the ML model to use
-    ml_model = MultiLayerPerceptronNN(hidden_layer_sizes=(300, 78), activation='logistic',
+    ml_model = MultiLayerPerceptronNN(hidden_layer_sizes=(280, 75), activation='logistic',
                                       solver="adam", random_state=0, verbose=verbose,
                                       learning_rate_init=1e-3, early_stopping=early_stop, validation_fraction=0.2,
                                       tol=1e-6, alpha=0.0001, learning_rate="adaptive", max_iter=10000,

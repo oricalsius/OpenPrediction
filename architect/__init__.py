@@ -2,9 +2,7 @@
 This package includes the main high level class to use.
 """
 
-from examples import get_data_example, normalize_fit_data, restore_y
 from learning.transforms import Normalization
-from learning import MultiLayerPerceptronNN
 from graphs import display_graph
 from joblib import dump, load
 import numpy as np
@@ -558,8 +556,9 @@ class MLArchitect:
 
         # Apply PCA reduction to data_to_fit
         if pca_n_components > 0:
-            data_transform = norm_object.transform(data_to_fit)
-            _ = norm_object.pca_reduction_fit(data_transform, pca_n_components, svd_solver="full")
+            norm_object.add_pca_reduction(pca_n_components, svd_solver="full")
+
+        norm_object.fit(data_to_fit)
 
         # Save models
         if save_normalize_x_model is not None and save_normalize_x_model != '':

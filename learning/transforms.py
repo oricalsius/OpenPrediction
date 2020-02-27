@@ -1,7 +1,7 @@
-from sklearn import preprocessing, decomposition, tree, neural_network
+from sklearn import preprocessing, decomposition
 from sklearn import model_selection
 from joblib import dump, load
-from typing import List, Any
+from typing import List
 import pandas as pd
 #import numpy as np
 
@@ -66,16 +66,16 @@ class Normalization:
 
         scale = preprocessing.MinMaxScaler(feature_range=min_max_range)
 
-        # Apply the previous scaling methods
-        transformed_data = self.transform(data)
-
-        if min_max_scale_columns:
-            if min_max_scale_columns not in transformed_data:
-                raise Exception(f"Key error: Following columns {min_max_scale_columns} are not in data.")
-
-            scale = scale.fit(transformed_data[min_max_scale_columns])
-        else:
-            scale = scale.fit(transformed_data)
+        # # Apply the previous scaling methods
+        # transformed_data = self.transform(data)
+        #
+        # if min_max_scale_columns:
+        #     if min_max_scale_columns not in transformed_data:
+        #         raise Exception(f"Key error: Following columns {min_max_scale_columns} are not in data.")
+        #
+        #     scale = scale.fit(transformed_data[min_max_scale_columns])
+        # else:
+        #     scale = scale.fit(transformed_data)
 
         self._normalization_steps.append((scale, min_max_scale_columns))
 
@@ -92,16 +92,16 @@ class Normalization:
 
         scale = preprocessing.StandardScaler()
 
-        # Apply the previous scaling methods
-        transformed_data = self.transform(data)
-
-        if standard_scale_columns:
-            if standard_scale_columns not in transformed_data:
-                raise Exception(f"Key error: Following columns {standard_scale_columns} are not in data.")
-
-            scale = scale.fit(transformed_data[standard_scale_columns])
-        else:
-            scale = scale.fit(transformed_data)
+        # # Apply the previous scaling methods
+        # transformed_data = self.transform(data)
+        #
+        # if standard_scale_columns:
+        #     if standard_scale_columns not in transformed_data:
+        #         raise Exception(f"Key error: Following columns {standard_scale_columns} are not in data.")
+        #
+        #     scale = scale.fit(transformed_data[standard_scale_columns])
+        # else:
+        #     scale = scale.fit(transformed_data)
 
         self._normalization_steps.append((scale, standard_scale_columns))
 
@@ -120,18 +120,49 @@ class Normalization:
         """
         scale = preprocessing.PowerTransformer(method=gaussian_like_method, standardize=standardize)
 
-        # Apply the previous scaling methods
-        transformed_data = self.transform(data)
-
-        if gaussian_like_scale_columns:
-            if gaussian_like_scale_columns not in transformed_data:
-                raise Exception(f"Key error: Following columns {gaussian_like_scale_columns} are not in data.")
-
-            scale = scale.fit(transformed_data[gaussian_like_scale_columns])
-        else:
-            scale = scale.fit(transformed_data)
+        # # Apply the previous scaling methods
+        # transformed_data = self.transform(data)
+        #
+        # if gaussian_like_scale_columns:
+        #     if gaussian_like_scale_columns not in transformed_data:
+        #         raise Exception(f"Key error: Following columns {gaussian_like_scale_columns} are not in data.")
+        #
+        #     scale = scale.fit(transformed_data[gaussian_like_scale_columns])
+        # else:
+        #     scale = scale.fit(transformed_data)
 
         self._normalization_steps.append((scale, gaussian_like_scale_columns))
+
+    def fit(self, data: object):
+        """
+        Fit each scaling step from self._normalization_steps to data.
+
+        Fit pca reduction also if defined.
+
+        :param data: Input data to fit the model.
+        :return:
+        """
+
+        transformed_data = data.copy()
+
+        for scale, columns_to_scale in self._normalization_steps:
+            if columns_to_scale:
+                if columns_to_scale not in transformed_data:
+                    raise Exception(f"Key error: Following columns {columns_to_scale} are not in data to fit.")
+
+                scale = scale.fit(transformed_data[columns_to_scale])
+                df = pd.DataFrame(scale.transform(transformed_data[columns_to_scale]), columns=columns_to_scale)
+                df.index = transformed_data.index
+                transformed_data[columns_to_scale] = df
+
+            else:
+                scale = scale.fit(transformed_data)
+                df = pd.DataFrame(scale.transform(transformed_data), columns=data.columns)
+                df.index = data.index
+                transformed_data = df
+
+        if self._pca:
+            self.pca_reduction_fit(transformed_data)
 
     def transform(self, data: object):
         """
@@ -139,7 +170,7 @@ class Normalization:
 
         Apply pca reduction also if defined.
 
-        :param data: Input data to fit the model.
+        :param data: Input data to transform.
         :return:
         """
 
@@ -191,17 +222,19 @@ class Normalization:
 
         return inversed_data
 
-    def pca_reduction_fit(self, data: object, n_components: int = None, **kwargs):
+    def add_pca_reduction(self, n_components: int = None, **kwargs):
         # n_components can also be 'mle' or a number in [0,1]
         self._pca = decomposition.PCA(n_components=n_components, **kwargs)
+
+    def pca_reduction_fit(self, data: object):
+        # n_components can also be 'mle' or a number in [0,1]
         self._pca = self._pca.fit(data)
-        return self._pca
 
     def pca_reduction_transform(self, data: object):
         return self._pca.transform(data)
 
-    def pca_reduction_fit_transform(self, data: object, n_components: int = None, **kwargs):
-        self.pca_reduction_fit(data, n_components, **kwargs)
+    def pca_reduction_fit_transform(self, data: object):
+        self.pca_reduction_fit(data)
         return self.pca_reduction_transform(data)
 
     def pca_reduction_inverse_transform(self, data: object):
