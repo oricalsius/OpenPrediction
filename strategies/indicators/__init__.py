@@ -2,12 +2,14 @@
 This module is defining all the functions that are necessary to create indicators.
 """
 
-from typing import List, Union, Any, Dict, Tuple
-from .utils import _get_columns
-from .processing import ProcessingIndicators
-from scipy.stats import norminvgauss, norm
-import pandas as pd
+from typing import List, Union, Any, Dict, Tuple, Callable
+
 import numpy as np
+import pandas as pd
+from scipy.stats import norminvgauss, norm
+
+from .processing import ProcessingIndicators
+from .utils import _get_columns
 
 
 class Indicators(ProcessingIndicators):
@@ -92,10 +94,10 @@ class Indicators(ProcessingIndicators):
 
         kwargs = {}
         if floc is not None:
-            kwargs['floc': floc]
+            kwargs['floc'] = floc
 
         if fscale is not None:
-            kwargs['fscale': fscale]
+            kwargs['fscale'] = fscale
 
         a, b, loc, scale = norminvgauss.fit(data, **kwargs)
 
@@ -126,7 +128,8 @@ class Indicators(ProcessingIndicators):
                                 functions: List[str] = ["mean"],
                                 window: int = 14, quantile: float = 0.05,
                                 result_names: Dict[str, List[str]] = {"mean": ["SMA"]},
-                                add_to_data: bool = True) -> pd.DataFrame:
+                                add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                                *args, **kwargs) -> pd.DataFrame:
         """
         Provide rolling window calculations.
 
@@ -166,6 +169,18 @@ class Indicators(ProcessingIndicators):
             df = rolling_window.agg(func) if func != "quantile" else rolling_window.quantile(quantile=quantile)
             df.rename(columns=dict(zip(src_columns, target_columns_names)), inplace=True)
 
+            if ml_format is not None:
+                if callable(ml_format):
+                    df[target_columns_names] = ml_format(df[target_columns_names], *args, **kwargs)
+
+                elif isinstance(ml_format, bool):
+                    if ml_format:
+                        df.loc[:, target_columns_names] = np.log(df[target_columns_names].values
+                                                                 / data[src_columns].values)
+
+                else:
+                    raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
+
             if add_to_data:
                 data[target_columns_names] = df
             else:
@@ -176,40 +191,72 @@ class Indicators(ProcessingIndicators):
         else:
             return result_df
 
-    def _moving_window_functions(self, columns: Union[List[str], str],
-                                 functions: List[str] = ["mean"],
+    def _moving_window_functions(self, columns: Union[List[str], str], functions: List[str] = ["mean"],
                                  window: int = 14, quantile: float = 0.05,
                                  result_names: Dict[str, List[str]] = {"mean": ["SMA"]},
-                                 add_to_data: bool = True) -> pd.DataFrame:
+                                 add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                                 *args, **kwargs) -> pd.DataFrame:
 
-        return self.moving_window_functions(self._data, columns, functions, window, quantile, result_names, add_to_data)
+        return self.moving_window_functions(self._data, columns, functions, window, quantile,
+                                            result_names, add_to_data, ml_format, *args, **kwargs)
 
-    def moving_average(self, columns: Union[List[str], str], window: int = 14,
-                       result_names: List[str] = None, add_to_data: bool = True) -> pd.DataFrame:
+    def moving_average(self, columns: Union[List[str], str], window: int = 14, result_names: List[str] = None,
+                       add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                       *args, **kwargs) -> pd.DataFrame:
         if result_names is None:
             result_names = ["SMA" + str(window) + "_" + col for col in columns]
 
-        return self._moving_window_functions(columns, ["mean"], window, result_names={"mean": result_names},
-                                             add_to_data=add_to_data)
+        df = self._moving_window_functions(columns, ["mean"], window, result_names={"mean": result_names},
+                                           add_to_data=add_to_data, ml_format=ml_format, *args, **kwargs)
+
+        return df
 
     def moving_std(self, columns: Union[List[str], str], window: int = 14,
-                   result_names: List[str] = None, add_to_data: bool = True) -> pd.DataFrame:
+                   result_names: List[str] = None, add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                   ml_format_axis: int = 1) -> pd.DataFrame:
         if result_names is None:
             result_names = ["Std" + str(window) + "_" + col for col in columns]
 
-        return self._moving_window_functions(columns, ["std"], window, result_names={"std": result_names},
-                                             add_to_data=add_to_data)
+        df = self._moving_window_functions(columns, ["std"], window, result_names={"std": result_names},
+                                           add_to_data=add_to_data)
+        if ml_format is not None:
+            if callable(ml_format):
+                df[result_names] = df.apply(ml_format, axis=ml_format_axis)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    df[result_names] = np.log(df[result_names] / self.data[columns].values)
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
+
+        return df
 
     def moving_var(self, columns: Union[List[str], str], window: int = 14,
-                   result_names: List[str] = None, add_to_data: bool = True) -> pd.DataFrame:
+                   result_names: List[str] = None, add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                   ml_format_axis: int = 1) -> pd.DataFrame:
         if result_names is None:
             result_names = ["VAR" + str(window) + "_" + col for col in columns]
 
-        return self._moving_window_functions(columns, ["var"], window, result_names={"var": result_names},
-                                             add_to_data=add_to_data)
+        df = self._moving_window_functions(columns, ["var"], window, result_names={"var": result_names},
+                                           add_to_data=add_to_data)
+
+        if ml_format is not None:
+            if callable(ml_format):
+                df[result_names] = df.apply(ml_format, axis=ml_format_axis)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    df[result_names] = np.log(df[result_names] / self.data[columns].values)
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
+
+        return df
 
     def true_range(self, close_name: str = "close", high_name: str = "high", low_name: str = "low",
-                   window: int = 1, result_names: str = None, add_to_data: bool = True) -> pd.DataFrame:
+                   window: int = 1, result_names: str = None, add_to_data: bool = True,
+                   ml_format: Union[Callable, bool] = None, ml_format_axis: int = 1) -> pd.DataFrame:
         if result_names is None:
             result_names = "TR_" + str(window)
 
@@ -220,6 +267,23 @@ class Indicators(ProcessingIndicators):
         if window > 1:
             df = df.rolling(window=window).mean()
 
+        if ml_format is not None:
+            if callable(ml_format):
+                df[[result_names]] = df.apply(ml_format, axis=ml_format_axis)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    columns = ["open", "close", "high", "low", "vol", "amount"]
+                    columns = list(set(columns) - (set(columns) - set(self.data.columns)))
+                    new_columns = [result_names + "_velocity_" + x for x in columns]
+
+                    df = pd.DataFrame(np.log(df[[result_names]*len(columns)].values / self.data[columns].values),
+                                      columns=new_columns, index=df.index)
+                    result_names = new_columns
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
+
         if add_to_data:
             self.data[result_names] = df
             return self.data
@@ -227,7 +291,8 @@ class Indicators(ProcessingIndicators):
             return df
 
     def average_true_range(self, close_name: str = "close", high_name: str = "high", low_name: str = "low",
-                           window: int = 1, result_names: str = None, add_to_data: bool = True) -> pd.DataFrame:
+                           window: int = 1, result_names: str = None, add_to_data: bool = True,
+                           ml_format: Union[Callable, bool] = None, ml_format_axis: int = 1) -> pd.DataFrame:
         if result_names is None:
             result_names = "ATR_" + str(window)
 
@@ -238,6 +303,24 @@ class Indicators(ProcessingIndicators):
                                                      add_to_data=False)
         df_atr.columns = [result_names]
 
+        if ml_format is not None:
+            if callable(ml_format):
+                df_atr[[result_names]] = df_atr.apply(ml_format, axis=ml_format_axis)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    columns = ["open", "close", "high", "low", "vol", "amount"]
+                    columns = list(set(columns) - (set(columns) - set(self.data.columns)))
+                    new_columns = [result_names + "_velocity_" + x for x in columns]
+
+                    df_atr = pd.DataFrame(np.log(df_atr[[result_names]*len(columns)].values
+                                                 / self.data[columns].values),
+                                          columns=new_columns, index=df_atr.index)
+                    result_names = new_columns
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
+
         if add_to_data:
             self.data[result_names] = df_atr
             return self.data
@@ -245,7 +328,7 @@ class Indicators(ProcessingIndicators):
             return df_atr
 
     def average_directional_index(self, close_name: str = "close", high_name: str = "high",
-                                  low_name: str = "low", window: int = 14, result_names: str = None,
+                                  low_name: str = "low", window: int = 14, result_name: str = None,
                                   add_to_data: bool = True) -> pd.DataFrame:
 
         """
@@ -254,47 +337,48 @@ class Indicators(ProcessingIndicators):
         https://www.investopedia.com/ask/answers/112814/how-average-directional-index-adx-calculated-and-what-formula.asp.
         """
 
-        if result_names is None:
-            result_names = "ADX_" + str(window)
+        if result_name is None:
+            result_name = "ADX_" + str(window)
 
-        m_positive = self.data[high_name] - self.data[high_name].shift(1)
-        m_negative = self.data[low_name].shift(1) - self.data[low_name]
+        if not isinstance(result_name, str):
+            raise Exception("Parameter result_name should be a string.")
 
-        dm_positive = pd.DataFrame(m_positive.copy())
-        dm_positive.columns = ["DMp"]
-        dm_positive[m_positive < m_negative] = 0
-        dm_positive[m_positive < 0] = 0
+        m_positive = self.data[high_name].values - self.data[high_name].shift(1).values
+        m_negative = self.data[low_name].shift(1).values - self.data[low_name].values
 
-        dm_negative = pd.DataFrame(m_negative.copy())
-        dm_negative.columns = ["DMn"]
-        dm_negative[m_negative < m_positive] = 0
-        dm_negative[m_negative < 0] = 0
-
-        smoothed_dm_positive = self.exponential_weighted_functions(dm_positive, "DMp", functions=["mean"],
+        dm_positive = m_positive.copy()
+        with np.errstate(invalid='ignore'):
+            dm_positive[(m_positive < m_negative) | (m_positive < 0)] = 0
+        df = pd.DataFrame(dm_positive, columns=["DMp"])
+        smoothed_dm_positive = self.exponential_weighted_functions(df, "DMp", functions=["mean"],
+                                                                   result_names={'mean': ["SDMp"]},
                                                                    alpha=1.0 / window, add_to_data=False)
-        smoothed_dm_positive.columns = ["SDMp"]
 
-        smoothed_dm_negative = self.exponential_weighted_functions(dm_negative, "DMn", functions=["mean"],
+        dm_negative = m_negative.copy()
+        with np.errstate(invalid='ignore'):
+            dm_negative[(m_negative < m_positive) | (m_negative < 0)] = 0
+        df = pd.DataFrame(dm_negative, columns=["DMn"])
+        smoothed_dm_negative = self.exponential_weighted_functions(df, "DMn", functions=["mean"],
+                                                                   result_names={'mean': ["SDMn"]},
                                                                    alpha=1.0 / window, add_to_data=False)
-        smoothed_dm_negative.columns = ["SDMn"]
 
         # DI+ and DI-
         atr = self.average_true_range(close_name, high_name, low_name, window, "ATR", False)
-        directional_index_positive = pd.DataFrame(smoothed_dm_positive["SDMp"].div(atr["ATR"]) * 100,
-                                                  columns=["DIp_" + str(window)])
-        directional_index_negative = pd.DataFrame(smoothed_dm_negative["SDMn"].div(atr["ATR"]) * 100,
-                                                  columns=["DIn_" + str(window)])
+        directional_index_positive = pd.DataFrame((smoothed_dm_positive["SDMp"].values / atr["ATR"].values) * 100,
+                                                  columns=["DIp_" + str(window)], index=atr.index)
+        directional_index_negative = pd.DataFrame((smoothed_dm_negative["SDMn"].values / atr["ATR"].values) * 100,
+                                                  columns=["DIn_" + str(window)], index=atr.index)
 
         # DXI
-        dxi = pd.DataFrame(100 * abs(directional_index_positive["DIp_" + str(window)]
-                                     - directional_index_negative["DIn_" + str(window)])
-                           / abs(directional_index_positive["DIp_" + str(window)]
-                                 + directional_index_negative["DIn_" + str(window)]), columns=["DXI_" + str(window)])
+        dxi = pd.DataFrame(100 * np.abs(directional_index_positive["DIp_" + str(window)].values
+                                        - directional_index_negative["DIn_" + str(window)].values)
+                           / np.abs(directional_index_positive["DIp_" + str(window)].values
+                                    + directional_index_negative["DIn_" + str(window)].values),
+                           columns=["DXI_" + str(window)], index=directional_index_positive.index)
 
         # ADX
         adx = self.exponential_weighted_functions(dxi, "DXI_" + str(window), functions=["mean"], alpha=1.0 / window,
-                                                  add_to_data=False)
-        adx.columns = [result_names]
+                                                  result_names={'mean': [result_name]}, add_to_data=False)
 
         df = pd.concat([directional_index_positive, directional_index_negative, dxi, adx], axis=1)
 
@@ -304,9 +388,9 @@ class Indicators(ProcessingIndicators):
         else:
             return df
 
-    def moving_average_channel(self, columns: Union[List[str], str], window: int = 1,
-                               nb_of_deviations: int = 3, result_names: List[str] = None,
-                               add_to_data: bool = True) -> pd.DataFrame:
+    def moving_average_channel(self, columns: Union[List[str], str], window: int = 1, nb_of_deviations: int = 3,
+                               result_names: List[str] = None, add_to_data: bool = True,
+                               ml_format: Union[Callable, bool] = None, ml_format_axis: int = 1) -> pd.DataFrame:
         if result_names is None:
             result_names = ["MAChannel" + str(window) + "_" + str(nb_of_deviations) + "_" + col for col in columns]
 
@@ -322,13 +406,26 @@ class Indicators(ProcessingIndicators):
         upper_channel_names = [col + "_UP" for col in result_names]
         down_channel_names = [col + "_DOWN" for col in result_names]
 
-        for i, col in enumerate(average_names):
-            result_df = pd.concat([result_df,
-                                   pd.DataFrame(result_df[col] + nb_of_deviations * std[std_names[i]],
-                                                columns=[upper_channel_names[i]]),
-                                   pd.DataFrame(result_df[col] - nb_of_deviations * std[std_names[i]],
-                                                columns=[down_channel_names[i]])
-                                   ], axis=1)
+        result_df = pd.concat([result_df,
+                               pd.DataFrame(result_df.values + nb_of_deviations * std.values,
+                                            columns=upper_channel_names, index=result_df.index),
+                               pd.DataFrame(result_df.values - nb_of_deviations * std.values,
+                                            columns=down_channel_names, index=result_df.index)], axis=1)
+
+        if ml_format is not None:
+            if callable(ml_format):
+                for col_list in (average_names, upper_channel_names, down_channel_names):
+                    result_df[col_list] = result_df.apply(ml_format, axis=ml_format_axis)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    col_list = average_names + upper_channel_names + down_channel_names
+                    result_df[col_list] = pd.DataFrame(np.log(result_df[col_list].values
+                                                              / self.data[columns*3].values),
+                                                       columns=col_list, index=result_df.index)
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
 
         if add_to_data:
             self.data[result_df.columns] = result_df
@@ -415,45 +512,101 @@ class Indicators(ProcessingIndicators):
     def exponential_weighted_moving_average(self, columns: Union[List[str], str],
                                             span: Any = None, com: Any = None, halflife: Any = None,
                                             alpha: Any = None, result_names: List[str] = None,
-                                            add_to_data: bool = True) -> pd.DataFrame:
+                                            add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                                            ml_format_axis: int = 1) -> pd.DataFrame:
         if result_names is None:
             result_names = ["EMA" + "_" + col for col in columns]
 
-        return self._exponential_weighted_functions(columns, ["mean"], span, com, halflife, alpha,
-                                                    result_names={"mean": result_names}, add_to_data=add_to_data)
+        df = self._exponential_weighted_functions(columns, ["mean"], span, com, halflife, alpha,
+                                                  result_names={"mean": result_names}, add_to_data=add_to_data)
+
+        if ml_format is not None:
+            if callable(ml_format):
+                df[result_names] = df.apply(ml_format, axis=ml_format_axis)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    df[result_names] = np.log(df[result_names] / self.data[columns].values)
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
+
+        return df
 
     def exponential_weighted_moving_std(self, columns: Union[List[str], str],
                                         span: Any = None, com: Any = None, halflife: Any = None,
                                         alpha: Any = None, result_names: List[str] = None,
-                                        add_to_data: bool = True) -> pd.DataFrame:
+                                        add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                                        ml_format_axis: int = 1) -> pd.DataFrame:
         if result_names is None:
             result_names = ["EMStd" + "_" + col for col in columns]
 
-        return self._exponential_weighted_functions(columns, ["std"], span, com, halflife, alpha,
-                                                    result_names={"std": result_names}, add_to_data=add_to_data)
+        df = self._exponential_weighted_functions(columns, ["std"], span, com, halflife, alpha,
+                                                  result_names={"std": result_names}, add_to_data=add_to_data)
+
+        if ml_format is not None:
+            if callable(ml_format):
+                df[result_names] = df.apply(ml_format, axis=ml_format_axis)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    df[result_names] = np.log(df[result_names] / self.data[columns].values)
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
+
+        return df
 
     def exponential_weighted_moving_var(self, columns: Union[List[str], str],
                                         span: Any = None, com: Any = None, halflife: Any = None,
                                         alpha: Any = None, result_names: List[str] = None,
-                                        add_to_data: bool = True) -> pd.DataFrame:
+                                        add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                                        ml_format_axis: int = 1) -> pd.DataFrame:
         if result_names is None:
             result_names = ["EMVar" + "_" + col for col in columns]
 
-        return self._exponential_weighted_functions(columns, ["var"], span, com, halflife, alpha,
-                                                    result_names={"var": result_names}, add_to_data=add_to_data)
+        df = self._exponential_weighted_functions(columns, ["var"], span, com, halflife, alpha,
+                                                  result_names={"var": result_names}, add_to_data=add_to_data)
+        if ml_format is not None:
+            if callable(ml_format):
+                df[result_names] = df.apply(ml_format, axis=ml_format_axis)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    df[result_names] = np.log(df[result_names] / self.data[columns].values)
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
+
+        return df
 
     def modified_moving_average(self, columns: Union[List[str], str], window: int = 1,
-                                result_names: List[str] = None, add_to_data: bool = True) -> pd.DataFrame:
+                                result_names: List[str] = None, add_to_data: bool = True,
+                                ml_format: Union[Callable, bool] = None, ml_format_axis: int = 1) -> pd.DataFrame:
         if result_names is None:
             result_names = ["ModAverage" + str(window) + "_" + col for col in columns]
 
-        return self._exponential_weighted_functions(columns, ["mean"], alpha=1.0 / window, adjust=False,
-                                                    result_names={"mean": result_names}, add_to_data=add_to_data)
+        df = self._exponential_weighted_functions(columns, ["mean"], alpha=1.0 / window, adjust=False,
+                                                  result_names={"mean": result_names}, add_to_data=add_to_data)
+
+        if ml_format is not None:
+            if callable(ml_format):
+                df[result_names] = df.apply(ml_format, axis=ml_format_axis)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    df[result_names] = np.log(df[result_names] / self.data[columns].values)
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
+
+        return df
 
     def exponential_weighted_moving_average_channel(self, columns: Union[List[str], str], span: Any = None,
                                                     com: Any = None, halflife: Any = None, alpha: Any = None,
                                                     nb_of_deviations: int = 3, result_names: List[str] = None,
-                                                    add_to_data: bool = True) -> pd.DataFrame:
+                                                    add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                                                    ml_format_axis: int = 1) -> pd.DataFrame:
         if result_names is None:
             result_names = ["EMAChannel" + "_" + str(nb_of_deviations) + "_" + col for col in columns]
 
@@ -471,13 +624,26 @@ class Indicators(ProcessingIndicators):
         upper_channel_names = [col + "_UP" for col in result_names]
         down_channel_names = [col + "_DOWN" for col in result_names]
 
-        for i, col in enumerate(average_names):
-            result_df = pd.concat([result_df,
-                                   pd.DataFrame(result_df[col] + nb_of_deviations * std[std_names[i]],
-                                                columns=[upper_channel_names[i]]),
-                                   pd.DataFrame(result_df[col] - nb_of_deviations * std[std_names[i]],
-                                                columns=[down_channel_names[i]])
-                                   ], axis=1)
+        result_df = pd.concat([result_df,
+                               pd.DataFrame(result_df.values + nb_of_deviations * std.values,
+                                            columns=upper_channel_names, index=result_df.index),
+                               pd.DataFrame(result_df.values - nb_of_deviations * std.values,
+                                            columns=down_channel_names, index=result_df.index)], axis=1)
+
+        if ml_format is not None:
+            if callable(ml_format):
+                for col_list in (average_names, upper_channel_names, down_channel_names):
+                    result_df[col_list] = result_df.apply(ml_format, axis=ml_format_axis)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    col_list = average_names + upper_channel_names + down_channel_names
+                    result_df[col_list] = pd.DataFrame(np.log(result_df[col_list].values
+                                                       / self.data[columns * 3].values),
+                                                       columns=col_list, index=result_df.index)
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
 
         if add_to_data:
             self.data[result_df.columns] = result_df
@@ -486,7 +652,8 @@ class Indicators(ProcessingIndicators):
             return result_df
 
     def hull_moving_average(self, columns: Union[List[str], str], window: int = 1, result_names: List[str] = None,
-                            add_to_data: bool = True) -> pd.DataFrame:
+                            add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                            ml_format_axis: int = 1) -> pd.DataFrame:
         if result_names is None:
             result_names = ["HullMA" + "_" + col for col in columns]
 
@@ -500,6 +667,17 @@ class Indicators(ProcessingIndicators):
         df_nsqrt = self.exponential_weighted_functions(df_n2 - df_n, columns=result_names, functions=["mean"],
                                                        span=int(np.sqrt(window)),
                                                        result_names={"mean": result_names}, add_to_data=False)
+
+        if ml_format is not None:
+            if callable(ml_format):
+                df_nsqrt[result_names] = df_nsqrt.apply(ml_format, axis=ml_format_axis)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    df_nsqrt[result_names] = np.log(df_nsqrt[result_names] / self.data[columns].values)
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
 
         if add_to_data:
             self.data[df_nsqrt.columns] = df_nsqrt
