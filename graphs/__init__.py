@@ -4,8 +4,8 @@ from typing import List
 from pandas import DataFrame, Series
 
 
-def display_graph(data_to_display: DataFrame, data_index: Series, open: str, close: str,
-                  high: str, low: str, scatters_plot: dict = {}, sub_plots: List[dict] = []):
+def display_graph(data_to_display: DataFrame, data_index: Series, open: str = 'open', close: str = 'close',
+                  high: str = 'high', low: str = 'low', scatters_plot: dict = {}, sub_plots: List[dict] = []):
 
     empty_parameters = [key for key, value in
                         {"open": open, "close": close, "high": high, "low": low}.items()

@@ -70,9 +70,6 @@ class Normalization:
         # transformed_data = self.transform(data)
         #
         # if min_max_scale_columns:
-        #     if min_max_scale_columns not in transformed_data:
-        #         raise Exception(f"Key error: Following columns {min_max_scale_columns} are not in data.")
-        #
         #     scale = scale.fit(transformed_data[min_max_scale_columns])
         # else:
         #     scale = scale.fit(transformed_data)
@@ -96,9 +93,6 @@ class Normalization:
         # transformed_data = self.transform(data)
         #
         # if standard_scale_columns:
-        #     if standard_scale_columns not in transformed_data:
-        #         raise Exception(f"Key error: Following columns {standard_scale_columns} are not in data.")
-        #
         #     scale = scale.fit(transformed_data[standard_scale_columns])
         # else:
         #     scale = scale.fit(transformed_data)
@@ -124,9 +118,6 @@ class Normalization:
         # transformed_data = self.transform(data)
         #
         # if gaussian_like_scale_columns:
-        #     if gaussian_like_scale_columns not in transformed_data:
-        #         raise Exception(f"Key error: Following columns {gaussian_like_scale_columns} are not in data.")
-        #
         #     scale = scale.fit(transformed_data[gaussian_like_scale_columns])
         # else:
         #     scale = scale.fit(transformed_data)
@@ -147,9 +138,6 @@ class Normalization:
 
         for scale, columns_to_scale in self._normalization_steps:
             if columns_to_scale:
-                if columns_to_scale not in transformed_data:
-                    raise Exception(f"Key error: Following columns {columns_to_scale} are not in data to fit.")
-
                 scale = scale.fit(transformed_data[columns_to_scale])
                 df = pd.DataFrame(scale.transform(transformed_data[columns_to_scale]), columns=columns_to_scale)
                 df.index = transformed_data.index
