@@ -3,14 +3,14 @@ This package includes the main high level class to use.
 """
 
 from learning.transforms import Normalization
-from graphs import display_graph
+from sklearn.metrics import r2_score
 from joblib import dump, load
+from strategies.indicators import Indicators
+from typing import Any, Callable, Tuple, Union, List
 import numpy as np
 import pandas as pd
-from typing import Any, Callable, Tuple, Union, List
 import os
 import sys
-from strategies.indicators import Indicators
 
 
 class MLArchitect:
@@ -21,30 +21,26 @@ class MLArchitect:
                  normalize_x_callable: Any = "default_normalizer", save_normalize_x_model: str = None,
                  normalize_y_callable: Any = "default_normalizer", save_normalize_y_model: str = None,
                  window_prediction: int = 4, test_size: float = 0.1, random_state: int = 0,
-                 ml_model: Any = None, save_ml_path: str = None):
+                 pca_n_components: float = 0.95, ml_model: Any = None, save_ml_path: str = None):
 
         # Variable initializing
+        default_src_columns = ["open", "close", "high", "low"]
+        columns_to_clean = ["open", "close", "high", "low", "count", "vol", "amount"]
         self._window_prediction = window_prediction
 
         # Load x
         self._x = self._load_data(x_data, index_col, index_infer_datetime_format, index_unit_datetime)
-        self._original_prices = None
-        if set(["open", "close", "high", "low"]) in set(self._x.columns):
-            self._original_prices = self._x["open", "close", "high", "low"]
 
         # Get default indicators or user defined indicators with indicators_callable
         self._data_with_indicators = pd.DataFrame()
         self._get_indicators(indicators_callable, is_x_flat)
-        if not self._data_with_indicators.empty and self._original_prices.empty \
-                and set(["open", "close", "high", "low"]) in set(self._data_with_indicators.columns):
-            self._original_prices = self._data_with_indicators["open", "close", "high", "low"]
 
         # Get y
         self._y = pd.DataFrame()
         self._get_y(y_data, index_col, index_infer_datetime_format, index_unit_datetime)
 
         # Clean data
-        self.clean_data(self._x, ["open", "close", "high", "low"], dropna=True, inplace=True)
+        self.clean_data(self._x, columns_to_clean, dropna=True, inplace=True)
         self.clean_data(self._data_with_indicators, [], dropna=True, inplace=True)
         self.clean_data(self._y, [], dropna=True, inplace=True)
 
@@ -66,6 +62,7 @@ class MLArchitect:
 
         # Normalize train and test x
         self._x_norm_model = None
+        self._pca_n_components = pca_n_components
         self.norm_input_fit(normalize_x_callable, save_normalize_x_model)
 
         # Normalize train and test y
@@ -106,10 +103,14 @@ class MLArchitect:
             y_train = self.y_train
             y_train = self.norm_output_transform(y_train)
 
-        self._ml_model = self._ml_model.fit(x_train, y_train)
+        self._ml_model.fit(x_train, y_train)
 
-    def ml_predict(self, x: object = None, columns_for_dataframe: List = [], index_for_dataframe: object = None,
-                   sort_index: bool = False, **kwargs_restoration):
+        # Save models
+        if self.ml_path is not None and self.ml_path != '':
+            self.ml_save_model(model_path=self.ml_path)
+
+    def ml_predict(self, x: object = None, columns_for_dataframe: List = None, index_for_dataframe: object = None,
+                   sort_index: bool = False, restore_y: bool = False, **kwargs_restoration):
         if not self._ml_model:
             raise Exception("Machine learning model not found. You should call ml_init_model.")
 
@@ -121,14 +122,19 @@ class MLArchitect:
         index = index_for_dataframe
         if x is None or len(x) == 0:
             x_to_predict = self.norm_input_transform(self._x)
-            columns = self._y.columns if not columns else columns
-            index = self._x.index if not index else index
+
+        columns = list(self._y.columns) if not columns else columns
+        index = list(x_to_predict.index) if not index else index
 
         y_predicted = self._ml_model.predict(x_to_predict, columns, index, sort_index)
         y_predicted = self.norm_output_inverse_transform(y_predicted)
 
-        if callable(self._y_restoration_routine):
-            return self._y_restoration_routine(y_predicted, **kwargs_restoration)
+        if restore_y:
+            if callable(self._y_restoration_routine):
+                return self._y_restoration_routine(y_predicted, **kwargs_restoration)
+            else:
+                raise Exception(f"y_restoration_routine: {self._y_restoration_routine} is not recognized as a "
+                                f"callable object.")
         else:
             return y_predicted
 
@@ -151,23 +157,47 @@ class MLArchitect:
 
         return self._ml_model.score(x_train, y_train)
 
-    def ml_score_train(self):
-        x_train = self.x_train
-        x_train = self.norm_input_transform(x_train)
+    def ml_r2_score(self, x: object = None, y: object = None):
 
-        y_train = self.y_train
-        y_train = self.norm_output_transform(y_train)
+        if not self._ml_model:
+            raise Exception("Machine learning model not found. You should call ml_init_model.")
+
+        x_train = x
+        if x is None or len(x) == 0:
+            x_train = self.x_train
+            x_train = self.norm_input_transform(x_train)
+
+        y_train = y
+        if y is None or len(y) == 0:
+            y_train = self.y_train
+
+        y_predicted = self.ml_predict(x_train, restore_y=False)
+        return r2_score(y_train, y_predicted)
+
+    def ml_score_train(self):
+        x_train = self.norm_input_transform(self.x_train)
+        y_train = self.norm_output_transform(self.y_train)
 
         return self.ml_score(x_train, y_train)
 
     def ml_score_test(self):
-        x_test = self._x[self._x_test] if self._only_indices else self._x_test
-        x_test = self.norm_input_transform(x_test)
-
-        y_test = self._y[self._y_test] if self._only_indices else self._y_test
-        y_test = self.norm_output_transform(y_test)
+        x_test = self.norm_input_transform(self.x_test)
+        y_test = self.norm_output_transform(self.y_test)
 
         return self.ml_score(x_test, y_test)
+
+    def ml_r2_score_train(self):
+        x_train = self.norm_input_transform(self.x_train)
+        y_train = self.norm_output_transform(self.y_train)
+
+        return self.ml_r2_score(x_train, y_train)
+
+    def ml_r2_score_test(self):
+        x_test = self.norm_input_transform(self.x_test)
+        y_test = self.norm_output_transform(self.y_test)
+
+        return self.ml_r2_score(x_test, y_test)
+
     # endregion
 
     # region properties
@@ -228,7 +258,7 @@ class MLArchitect:
                 self._x = indicators_callable(self._x)
 
             else:
-                raise Exception(f"'indicators_callable' not recognized as a callable object.")
+                raise Exception("'indicators_callable' not recognized as a callable object.")
 
     @staticmethod
     def default_compute_process_indicators(original_data: pd.DataFrame, ascending_order: bool = True,
@@ -278,55 +308,52 @@ class MLArchitect:
     @staticmethod
     def _compute_indicators(original_data: pd.DataFrame, inplace: bool = True):
         data = original_data if inplace else original_data.copy()
-        indicator_object = Indicators(data)
+        ind_obj = Indicators(data)
 
-        # Simple and Exponential Moving average Channel
         src_columns = ["open", "close", "high", "low"]
-        target_columns_names = ["machannel_14_3_" + x for x in src_columns]
-        indicator_object.moving_average_channel(columns=src_columns, window=14, nb_of_deviations=3, add_to_data=True,
-                                                result_names=target_columns_names)
-        indicator_object.exponential_weighted_moving_average_channel(columns=src_columns, nb_of_deviations=3, span=14,
-                                                                     result_names=["ex_" + x for x in
-                                                                                   target_columns_names])
-
-        # Hull moving average
-        indicator_object.hull_moving_average(columns=src_columns, result_names=["hull_14_" + x for x in src_columns],
-                                             window=14)
-
-        # True Range and its average
-        indicator_object.true_range(window=1, result_names="tr")
-        indicator_object.average_true_range(result_names="tr_avg_14", window=14)
-
-        # Average Directional Index
-        indicator_object.average_directional_index(result_names="adx_14", window=14)
 
         # Simple and Exponential moving average, std and var
-        indicator_object.moving_average(columns=src_columns, window=14,
-                                        result_names=[x + "_avg_14" for x in src_columns])
-        indicator_object.moving_std(columns=src_columns, window=14, result_names=[x + "_std_14" for x in src_columns])
-        indicator_object.moving_var(columns=src_columns, window=14, result_names=[x + "_var_14" for x in src_columns])
-        indicator_object.exponential_weighted_moving_average(columns=src_columns, span=14,
-                                                             result_names=["ex_" + x + "_avg_14" for x in src_columns])
+        ind_obj.moving_average(columns=src_columns, window=14, result_names=[x + "_avg_14" for x in src_columns],
+                               ml_format=True)
+        ind_obj.moving_std(columns=src_columns, window=14, result_names=[x + "_std_14" for x in src_columns],
+                           ml_format=True)
+        ind_obj.exponential_weighted_moving_average(columns=src_columns, span=14, ml_format=True,
+                                                    result_names=["ex_" + x + "_avg_14" for x in src_columns])
 
-        indicator_object.exponential_weighted_moving_var(columns=src_columns, span=14,
-                                                         result_names=["ex_" + x + "_var_14" for x in src_columns])
+        ind_obj.exponential_weighted_moving_std(columns=src_columns, span=14,
+                                                result_names=["ex_" + x + "_std_14" for x in src_columns],
+                                                ml_format=True)
 
-        indicator_object.exponential_weighted_moving_std(columns=src_columns, span=14,
-                                                         result_names=["ex_" + x + "_std_14" for x in src_columns])
+        # Simple and Exponential Moving average Channel
+        target_columns_names = ["machannel_14_3_" + x for x in src_columns]
+        ind_obj.moving_average_channel(columns=src_columns, window=14, nb_of_deviations=3, add_to_data=True,
+                                       result_names=target_columns_names, ml_format=True)
+        ind_obj.exponential_weighted_moving_average_channel(columns=src_columns, nb_of_deviations=3, span=14,
+                                                            result_names=["ex_" + x for x in target_columns_names],
+                                                            ml_format=True)
+
+        # Hull moving average
+        ind_obj.hull_moving_average(columns=src_columns, result_names=["hull_14_" + x for x in src_columns], window=14,
+                                    ml_format=True)
+
+        # True Range and its average
+        ind_obj.true_range(window=1, result_names="tr", ml_format=True)
+        ind_obj.average_true_range(result_names="tr_avg_14", window=14, ml_format=True)
+
+        # Average Directional Index
+        ind_obj.average_directional_index(result_name="adx_14", window=14)
 
         # Quantile 0.05 and 0.95
-        indicator_object.moving_window_functions(indicator_object.data, columns=src_columns, functions=["quantile"],
-                                                 quantile=0.05, window=14,
-                                                 result_names={"quantile": [x + "_q_5" for x in src_columns]})
+        ind_obj.moving_window_functions(ind_obj.data, columns=src_columns, functions=["quantile"], quantile=0.05,
+                                        window=14, result_names={"quantile": [x + "_q_5" for x in src_columns]})
 
-        indicator_object.moving_window_functions(indicator_object.data, columns=src_columns, functions=["quantile"],
-                                                 quantile=0.95, window=14,
-                                                 result_names={"quantile": [x + "_q_95" for x in src_columns]})
+        ind_obj.moving_window_functions(ind_obj.data, columns=src_columns, functions=["quantile"], quantile=0.95,
+                                        window=14, result_names={"quantile": [x + "_q_95" for x in src_columns]})
 
         if inplace:
             return None,
         else:
-            return indicator_object.data
+            return ind_obj.data
 
     @staticmethod
     def _process_indicators(original_data: pd.DataFrame, inplace: bool = True):
@@ -455,7 +482,8 @@ class MLArchitect:
             if isinstance(normalize_x_callable, str):
                 if normalize_x_callable == "default_normalizer":
                     self._x_norm_model = self._default_normalizer(self.x_train, add_standard_scaling=True,
-                                                                  add_power_transform=True, pca_n_components=0.95,
+                                                                  add_power_transform=True,
+                                                                  pca_n_components=self._pca_n_components,
                                                                   save_normalize_x_model=save_normalize_x_model)
 
                 elif normalize_x_callable != '' and os.path.isfile(normalize_x_callable):
@@ -636,8 +664,40 @@ class MLArchitect:
                 raise Exception('y_restoration_routine parameter could only be default or a callable.')
 
     @staticmethod
-    def default_restore_y(flat_data: pd.DataFrame, y_predicted: pd.DataFrame, target_columns_names: List = [],
-                          window: int = 1, is_returns: bool = True):
+    def default_restore_y(y_predicted: pd.DataFrame, original_data: pd.DataFrame, src_columns: List = None,
+                          windows: int = 1, is_returns: bool = True) -> pd.DataFrame:
+        """
+        Restore y using the default algorithm.
+
+        To use only if y returns used to train the model have been generated using the default algorithm
+        default_get_y_to_predict. If it is not the case, you should define your proper routine to restore y and
+        bind it to architect object using set_y_restoration_routine.
+
+        :param y_predicted: Output from ML model.
+        :param original_data: Original Dataframe in which we can find src_columns.
+        :param src_columns: Source columns used to compute y in the correct order. Ex: ["open", "close", "high", "low"]
+        :param windows: The considered prediction window.
+        :param is_returns: Predicted y represents returns.
+        :return:
+        """
+
+        if not src_columns:
+            src_columns = ["open", "close", "high", "low"]
+
+        # Get source data object
+        src_data = original_data[src_columns]
+
+        res = pd.DataFrame()
+        for i in range(windows):
+            df = MLArchitect._restore_unique_window(y_predicted.iloc[:, i:i+len(src_columns)],
+                                                    src_data, window=i+1, is_returns=is_returns)
+            res = pd.concat([res, df], axis=1)
+
+        return res
+
+    @staticmethod
+    def _restore_unique_window(y_predicted: pd.DataFrame, flat_data: pd.DataFrame, target_columns_names: List = [],
+                               window: int = 1, is_returns: bool = True):
         """
         Restore flat values for y.
 
@@ -654,7 +714,7 @@ class MLArchitect:
 
         # Add nb window new lines to y_predicted
         sorted_index = sorted(y_predicted.index)
-        delta = sorted_index.index[1] - sorted_index.index[0]
+        delta = sorted_index[1] - sorted_index[0]
 
         df = pd.DataFrame([[]], index=pd.date_range(start=y_predicted.index.max()+delta,
                                                     end=y_predicted.index.max()+(window*delta),
@@ -662,7 +722,7 @@ class MLArchitect:
         predicted = pd.concat([y_predicted, df], axis=0)
 
         if is_returns:
-            df = pd.DataFrame(flat_data.loc[predicted.index] * predicted.apply(lambda x: np.exp(x)).values)
+            df = pd.DataFrame(flat_data.loc[predicted.index] * np.exp(predicted.values))
         else:
             df = predicted
 
