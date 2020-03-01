@@ -17,7 +17,9 @@ class MLArchitect:
     def __init__(self, x_data: Any, y_data: Any = None, save_x_path: str = None, is_x_flat: bool = False,
                  save_indicators_path: str = None, save_y_path: str = None,
                  index_col: str = None, index_infer_datetime_format: bool = True, index_unit_datetime: str = None,
-                 indicators_callable: Any = "default_gen_indicators", y_restoration_routine: Any = "default",
+                 learning_indicators_callable: Any = "default_gen_learning_indicators",
+                 display_indicators_callable: Any = "default_gen_display_indicators",
+                 y_restoration_routine: Any = "default",
                  normalize_x_callable: Any = "default_normalizer", save_normalize_x_model: str = None,
                  normalize_y_callable: Any = "default_normalizer", save_normalize_y_model: str = None,
                  window_prediction: int = 4, test_size: float = 0.1, random_state: int = 0,
@@ -31,9 +33,12 @@ class MLArchitect:
         # Load x
         self._x = self._load_data(x_data, index_col, index_infer_datetime_format, index_unit_datetime)
 
-        # Get default indicators or user defined indicators with indicators_callable
+        # Get default indicators or user defined ones with learning_indicators_callable
         self._data_with_indicators = pd.DataFrame()
-        self._get_indicators(indicators_callable, is_x_flat)
+        self._get_display_indicators(display_indicators_callable, is_x_flat)
+
+        # Get default learning indicators or user defined ones with learning_indicators_callable
+        self._get_learning_indicators(learning_indicators_callable, is_x_flat)
 
         # Get y
         self._y = pd.DataFrame()
@@ -247,12 +252,12 @@ class MLArchitect:
     # endregion
 
     # region indicators
-    def _get_indicators(self, indicators_callable: Any = "default_gen_indicators", is_x_flat: bool = False):
+    def _get_learning_indicators(self, indicators_callable: Any = "default_gen_learning_indicators",
+                                 is_x_flat: bool = False):
         if indicators_callable is not None:
-            if isinstance(indicators_callable, str) and indicators_callable == "default_gen_indicators":
+            if isinstance(indicators_callable, str) and indicators_callable == "default_gen_learning_indicators":
                 if is_x_flat:
-                    _, self._data_with_indicators = self.default_compute_process_indicators(self._x, inplace=True,
-                                                                                    return_data_with_indicators=True)
+                    _ = self.default_compute_learning_indicators(self._x, inplace=True)
 
             elif callable(indicators_callable):
                 self._x = indicators_callable(self._x)
@@ -261,80 +266,65 @@ class MLArchitect:
                 raise Exception("'indicators_callable' not recognized as a callable object.")
 
     @staticmethod
-    def default_compute_process_indicators(original_data: pd.DataFrame, ascending_order: bool = True,
-                                           drop_duplicates: bool = True, process_indicators: bool = True,
-                                           return_data_with_indicators: bool = False, inplace: bool = True):
+    def default_compute_learning_indicators(original_data: pd.DataFrame, ascending_order: bool = True,
+                                            drop_duplicates: bool = True, inplace: bool = True):
         """
         Function to generate defaults indicators and preprocess them.
-
-        It is a capsule calling compute_indicators and preprocess_indicators.
 
         :param pd.DataFrame original_data: Original x data.
         :param bool ascending_order: Order data in ascending order.
         :param bool drop_duplicates: Drop duplicated lines with the same index.
-        :param bool process_indicators: If yes, indicators are processed to respect the correct format.
-        :param bool return_data_with_indicators: If yes, returns data with flat indicators.
         :param bool inplace: If True, do operation inplace and return None.
         :return: None if inplace=True else data
         """
 
         data = original_data if inplace else original_data.copy()
-        indicator_object = Indicators(data)
-
-        # Sorting and Dropping duplicates from index
-        indicator_object.set_index(index_column_name=data.index.name, ascending_order=ascending_order,
-                                   drop_duplicates=drop_duplicates)
-
-        # Compute indicators
-        MLArchitect._compute_indicators(data, inplace=True)
-
-        # Process indicators
-        if process_indicators:
-            # All prices with indicators before preprocessing them
-            data_with_indicators = data.copy() if return_data_with_indicators else None
-
-            MLArchitect._process_indicators(data, inplace=True)
-        else:
-            data_with_indicators = data if return_data_with_indicators else None
-
-        # Example of how to use Pandas builtin methods
-        MLArchitect._use_pandas_builtin_functions(data, inplace=True)
-
-        if inplace:
-            return None, data_with_indicators
-        else:
-            return data, data_with_indicators
-
-    @staticmethod
-    def _compute_indicators(original_data: pd.DataFrame, inplace: bool = True):
-        data = original_data if inplace else original_data.copy()
         ind_obj = Indicators(data)
+        proc_object = ind_obj.preprocessing
 
         src_columns = ["open", "close", "high", "low"]
 
-        # Simple and Exponential moving average, std and var
+        # Sorting and Dropping duplicates from index
+        ind_obj.set_index(index_column_name=data.index.name, ascending_order=ascending_order,
+                          drop_duplicates=drop_duplicates)
+
+        # Simple moving average, std
         ind_obj.moving_average(columns=src_columns, window=14, result_names=[x + "_avg_14" for x in src_columns],
                                ml_format=True)
         ind_obj.moving_std(columns=src_columns, window=14, result_names=[x + "_std_14" for x in src_columns],
                            ml_format=True)
-        ind_obj.exponential_weighted_moving_average(columns=src_columns, span=14, ml_format=True,
-                                                    result_names=["ex_" + x + "_avg_14" for x in src_columns])
 
-        ind_obj.exponential_weighted_moving_std(columns=src_columns, span=14,
-                                                result_names=["ex_" + x + "_std_14" for x in src_columns],
-                                                ml_format=True)
+        # Quantile 0.05 and 0.95
+        ind_obj.moving_quantile(columns=src_columns, quantile=0.05, window=14, ml_format=True,
+                                result_names=[x + "_q_95" for x in src_columns])
 
-        # Simple and Exponential Moving average Channel
-        target_columns_names = ["machannel_14_3_" + x for x in src_columns]
-        ind_obj.moving_average_channel(columns=src_columns, window=14, nb_of_deviations=3, add_to_data=True,
-                                       result_names=target_columns_names, ml_format=True)
-        ind_obj.exponential_weighted_moving_average_channel(columns=src_columns, nb_of_deviations=3, span=14,
-                                                            result_names=["ex_" + x for x in target_columns_names],
-                                                            ml_format=True)
+        ind_obj.moving_quantile(columns=src_columns, quantile=0.95, window=14, ml_format=True,
+                                result_names=[x + "_q_95" for x in src_columns])
 
-        # Hull moving average
-        ind_obj.hull_moving_average(columns=src_columns, result_names=["hull_14_" + x for x in src_columns], window=14,
-                                    ml_format=True)
+        # Median
+        ind_obj.moving_median(columns=src_columns, window=14, result_names=[x + "_median_14" for x in src_columns],
+                              ml_format=True)
+
+        # Sum
+        ind_obj.moving_sum(columns=src_columns, window=5, result_names=[x + "_sum_5" for x in src_columns],
+                           ml_format=True)
+        ind_obj.moving_sum(columns=src_columns, window=10, result_names=[x + "_sum_10" for x in src_columns])
+        ind_obj.moving_sum(columns=src_columns, window=10, result_names=[x + "_sum_15" for x in src_columns],
+                           ml_format=True)
+
+        # Compute log divisions of Sum 10
+        columns = [x + "_sum_10" for x in src_columns]
+        proc_object.log_returns(columns, [x + "_log_div" for x in columns], window=1, delete_columns=True)
+
+        # Min, Max
+        ind_obj.moving_min(columns=src_columns, window=15, result_names=[x + "_min_15" for x in src_columns],
+                           ml_format=True)
+        ind_obj.moving_max(columns=src_columns, window=15, result_names=[x + "_max_15" for x in src_columns],
+                           ml_format=True)
+
+        # Skew, Kurt
+        ind_obj.moving_skew(columns=src_columns, window=14, result_names=[x + "_skew_14" for x in src_columns])
+        ind_obj.moving_kurt(columns=src_columns, window=14, result_names=[x + "_kurt_14" for x in src_columns])
 
         # True Range and its average
         ind_obj.true_range(window=1, result_names="tr", ml_format=True)
@@ -343,126 +333,130 @@ class MLArchitect:
         # Average Directional Index
         ind_obj.average_directional_index(result_name="adx_14", window=14)
 
-        # Quantile 0.05 and 0.95
-        ind_obj.moving_window_functions(ind_obj.data, columns=src_columns, functions=["quantile"], quantile=0.05,
-                                        window=14, result_names={"quantile": [x + "_q_5" for x in src_columns]})
+        # Exponential Moving average
+        ind_obj.exponential_weighted_moving_average(columns=src_columns, span=14, ml_format=True,
+                                                    result_names=["ex_" + x + "_avg_14" for x in src_columns])
 
-        ind_obj.moving_window_functions(ind_obj.data, columns=src_columns, functions=["quantile"], quantile=0.95,
-                                        window=14, result_names={"quantile": [x + "_q_95" for x in src_columns]})
+        ind_obj.exponential_weighted_moving_std(columns=src_columns, span=14,
+                                                result_names=["ex_" + x + "_std_14" for x in src_columns],
+                                                ml_format=True)
+
+        # Simple and Exponential Moving average Channel
+        target_columns_names = [x + "_machannel_14_3" for x in src_columns]
+        ind_obj.exponential_weighted_moving_average_channel(columns=src_columns, nb_of_deviations=3, span=14,
+                                                            result_names=["ex_" + x for x in target_columns_names],
+                                                            ml_format=True)
+
+        # Hull moving average
+        ind_obj.hull_moving_average(columns=src_columns, result_names=[x + "_hull_14" for x in src_columns], window=14,
+                                    ml_format=True)
+
+        # Compute log returns and normal returns for i+1 to i+14
+        for i in range(5):
+            proc_object.log_returns(src_columns, [x + "_log_returns_" + str(i + 1) for x in src_columns], window=i + 1)
+
+        # Compute the Simple and Exponential average of returns
+        returns_columns = [x + "_log_returns_" + str(i + 1) for x in src_columns for i in range(5)]
+        target_columns_names = ["ex_" + x + "_avg_14" for x in returns_columns]
+        ind_obj.exponential_weighted_moving_average(returns_columns, span=14, result_names=target_columns_names)
+
+        # Compute the Simple and Exponential std of returns
+        target_columns_names = ["ex_" + x + "_std_14" for x in returns_columns]
+        ind_obj.exponential_weighted_moving_std(returns_columns, span=14, result_names=target_columns_names)
+
+        # Columns for which we want to compute the square
+        returns_columns.extend(["ex_" + x + "_avg_14" for x in returns_columns])
+        target_columns_names = [x + "_square" for x in returns_columns]
+
+        # Compute square values
+        data[target_columns_names] = pd.DataFrame(np.square(data[returns_columns].values),
+                                                  columns=target_columns_names, index=data.index)
+
+        # Raise Velocity = (high-low)/amount
+        data["high_low_raise_velocity"] = pd.DataFrame((data["high"].values - data["low"].values)
+                                                       / data["amount"].values,
+                                                       columns=["high_low_raise_velocity"], index=data.index)
 
         if inplace:
-            return None,
+            return None
         else:
             return ind_obj.data
 
-    @staticmethod
-    def _process_indicators(original_data: pd.DataFrame, inplace: bool = True):
-        """
-        This function shows how to use the preprocessing object to do some computation on indicators.
+    def _get_display_indicators(self, indicators_callable: Any = "default_gen_display_indicators",
+                                is_x_flat: bool = False):
+        if indicators_callable is not None:
+            if isinstance(indicators_callable, str) and indicators_callable == "default_gen_display_indicators":
+                if is_x_flat:
+                    self._data_with_indicators = self.compute_indicators(self._x, inplace=False)
 
-        We need to preprocess indicators so they can have a meaning when predicting future.
+            elif callable(indicators_callable):
+                self._data_with_indicators = indicators_callable(self._x)
 
-        :param original_data: original data with generated indicators.
-        :param bool inplace: If True, do operation inplace and return None.
-        :return: None if inplace=True else data
-        """
-
-        data = original_data if inplace else original_data.copy()
-        indicator_object = Indicators(data)
-
-        preprocessing_object = indicator_object.preprocessing
-        drop_columns = []
-
-        # Compute log returns and normal returns for i+1 to i+14
-        src_columns = ["open", "close", "high", "low"]
-        for i in range(14):
-            preprocessing_object.log_returns(src_columns, [x + "_log_returns_" + str(i + 1) for x in src_columns],
-                                             window=i + 1)
-            preprocessing_object.pct_change(src_columns, [x + "_pct_changes_" + str(i + 1) for x in src_columns],
-                                            window=i + 1)
-
-        # Compute the Simple and Exponential average of returns
-        returns_columns = [x + "_log_returns_" + str(i + 1) for x in src_columns for i in range(14)]
-        returns_columns.extend([x + "_pct_changes_" + str(i + 1) for x in src_columns for i in range(14)])
-        target_columns_names = [x + "_avg_14" for x in returns_columns]
-        indicator_object.moving_average(returns_columns, window=14, result_names=target_columns_names)
-        indicator_object.exponential_weighted_moving_average(returns_columns, span=14,
-                                                             result_names=["ex_" + x for x in target_columns_names])
-
-        # Compute the Simple and Exponential var of returns
-        target_columns_names = [x + "_var_14" for x in returns_columns]
-        indicator_object.moving_var(returns_columns, window=14, result_names=target_columns_names)
-        indicator_object.exponential_weighted_moving_var(returns_columns, span=14,
-                                                         result_names=["ex_" + x for x in target_columns_names])
-
-        # Compute the Simple and Exponential std of returns
-        target_columns_names = [x + "_std_14" for x in returns_columns]
-        indicator_object.moving_std(returns_columns, window=14, result_names=target_columns_names)
-        indicator_object.exponential_weighted_moving_std(returns_columns, span=14,
-                                                         result_names=["ex_" + x for x in target_columns_names])
-
-        # Compute log division for all columns for which it is meaningful to know how much they deviate from
-        # source prices.
-        right_columns, src_columns = [], []
-        for x in ["open", "close", "high", "low"]:
-            src_columns.extend(
-                [prefix + "machannel_14_3_" + x + suffix for suffix in {"_AVG", "_UP", "_DOWN"} for prefix in
-                 {"", "ex_"}])
-            right_columns.extend([x] * 6)
-
-        drop_columns.extend(src_columns)
-        target_columns_names = [x + "_log_div" for x in src_columns]
-        df = pd.DataFrame(np.log(preprocessing_object.data[src_columns].values
-                                 / preprocessing_object.data[right_columns].values), columns=target_columns_names)
-        df.index = preprocessing_object.data.index
-        preprocessing_object.data[target_columns_names] = df
-
-        if drop_columns:
-            preprocessing_object.data.drop(columns=drop_columns, inplace=True)
-
-        if inplace:
-            return None,
-        else:
-            return preprocessing_object.data
+            else:
+                raise Exception("'indicators_callable' not recognized as a callable object.")
 
     @staticmethod
-    def _use_pandas_builtin_functions(original_data: pd.DataFrame, inplace: bool = True):
-        """
-        This example shows how to use Pandas built-in functions to Process indicators.
-
-        :param original_data: original data with generated indicators.
-        :param bool inplace: If True, do operation inplace and return None.
-        :return: None if inplace=True else data
-        """
-
-        # Get data object
+    def compute_indicators(original_data: pd.DataFrame, inplace: bool = True):
         data = original_data if inplace else original_data.copy()
+        ind_obj = Indicators(data)
+        proc_object = ind_obj.preprocessing
 
-        # Columns for which returns computation have sense (X_(i+1) - X_(i)) / X_(i)
         src_columns = ["open", "close", "high", "low"]
-        returns_columns = [x + "_log_returns_" + str(i + 1) for x in src_columns for i in range(14)]
-        returns_columns.extend([x + "_pct_changes_" + str(i + 1) for x in src_columns for i in range(14)])
-        returns_columns.extend([x + "_avg_14" for x in returns_columns])
 
-        target_columns_names = [x + "_square" for x in returns_columns]
+        # Quantile 0.05 and 0.95
+        ind_obj.moving_quantile(columns=src_columns, quantile=0.01, window=14,
+                                result_names=[x + "_q_95" for x in src_columns])
 
-        # Pandas apply method
-        data[target_columns_names] = data[returns_columns].apply(lambda x: np.square(x))
+        ind_obj.moving_quantile(columns=src_columns, quantile=0.99, window=14,
+                                result_names=[x + "_q_95" for x in src_columns])
+
+        # Median
+        ind_obj.moving_median(columns=src_columns, window=14, result_names=[x + "_median_14" for x in src_columns],
+                              ml_format=False)
+
+        # Sum
+        ind_obj.moving_sum(columns=src_columns, window=5, result_names=[x + "_sum_5" for x in src_columns],
+                           ml_format=True)
+
+        # Skew, Kurt
+        ind_obj.moving_skew(columns=src_columns, window=14, result_names=[x + "_skew_14" for x in src_columns])
+        ind_obj.moving_kurt(columns=src_columns, window=14, result_names=[x + "_kurt_14" for x in src_columns])
+
+        # True Range and its average
+        ind_obj.true_range(window=1, result_names="tr")
+        ind_obj.average_true_range(result_names="tr_avg_14", window=14)
+
+        # Average Directional Index
+        ind_obj.average_directional_index(result_name="adx_14", window=14)
+
+        # Exponential Moving average
+        ind_obj.exponential_weighted_moving_average(columns=src_columns, span=14,
+                                                    result_names=["ex_" + x + "_avg_14" for x in src_columns])
+
+        # Simple and Exponential Moving average Channel
+        target_columns_names = [x + "_machannel_14_3" for x in src_columns]
+        ind_obj.exponential_weighted_moving_average_channel(columns=src_columns, nb_of_deviations=3, span=14,
+                                                            result_names=["ex_" + x for x in target_columns_names],
+                                                            ml_format=False)
+
+        # Hull moving average
+        ind_obj.hull_moving_average(columns=src_columns, result_names=[x + "_hull_14" for x in src_columns], window=14,
+                                    ml_format=False)
 
         # Raise Velocity = (high-low)/amount
-        data["high_low_raise_velocity"] = data[["high", "low", "amount"]].apply(
-            lambda x: (x["high"] - x["low"]) / x["amount"], axis=1)
-        data["tr_raise_velocity"] = data[["tr", "amount"]].apply(lambda x: x["tr"] / x["amount"], axis=1)
-        data["tr_avg_14_raise_velocity"] = data[["tr_avg_14", "amount"]].apply(lambda x: x["tr_avg_14"] / x["amount"],
-                                                                               axis=1)
+        data["high_low_raise_velocity"] = pd.DataFrame((data["high"].values - data["low"].values)
+                                                       / data["amount"].values,
+                                                       columns=["high_low_raise_velocity"], index=data.index)
+
         if inplace:
-            return None,
+            return None
         else:
-            return data
+            return ind_obj.data
+
     # endregion
 
     # region normalization
-    def split_train_test(self, test_size: int = 0.1, random_state: int = 0, only_indices: bool = False):
+    def split_train_test(self, test_size: float = 0.1, random_state: int = 0, only_indices: bool = False):
         self._only_indices = only_indices
 
         if only_indices:
@@ -482,6 +476,7 @@ class MLArchitect:
             if isinstance(normalize_x_callable, str):
                 if normalize_x_callable == "default_normalizer":
                     self._x_norm_model = self._default_normalizer(self.x_train, add_standard_scaling=True,
+                                                                  min_max_range=(-1, 1),
                                                                   add_power_transform=True,
                                                                   pca_n_components=self._pca_n_components,
                                                                   save_normalize_x_model=save_normalize_x_model)
@@ -579,8 +574,8 @@ class MLArchitect:
         if add_power_transform:
             norm_object.add_power_transform_scaling(data_to_fit)
 
-        if min_max_range:
-            norm_object.add_min_max_scaling(data_to_fit, min_max_range=min_max_range)
+        #if min_max_range:
+            #norm_object.add_min_max_scaling(data_to_fit, min_max_range=min_max_range)
 
         # Apply PCA reduction to data_to_fit
         if pca_n_components > 0:
