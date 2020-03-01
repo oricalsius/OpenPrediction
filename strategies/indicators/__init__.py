@@ -3,10 +3,11 @@ This module is defining all the functions that are necessary to create indicator
 """
 
 from typing import List, Union, Any, Dict, Tuple, Callable
+from scipy.stats import norminvgauss, norm
+from .optim import *
 
 import numpy as np
 import pandas as pd
-from scipy.stats import norminvgauss, norm
 
 from .processing import ProcessingIndicators
 from .utils import _get_columns
@@ -17,13 +18,15 @@ class Indicators:
     Class containing all the definitions of built-in indicators.
     """
 
-    def __init__(self, data: pd.DataFrame):
+    def __init__(self, data: pd.DataFrame, is_parallel: bool = False):
         if data is None:
             raise Exception("Indicators object must be initialized with a valid pandas.DataFrame object.")
 
         self._data = data
         self._preprocessing = ProcessingIndicators(self._data)
+        self._is_parallel_computing = is_parallel
 
+    # region property
     @property
     def data(self):
         return self._data
@@ -32,49 +35,16 @@ class Indicators:
     def preprocessing(self):
         return self._preprocessing
 
+    @property
+    def is_parallel_computing(self):
+        return self._is_parallel_computing
+
     @preprocessing.setter
     def preprocessing(self, value):
         raise Exception("Read only objects cannot be assigned a variable.")
+    # endregion
 
-    def set_index(self, index_column_name: str, new_index_name: str = None, ascending_order: bool = True,
-                  is_timestamp: bool = False, unit: str = 's', drop_duplicates: bool = True) -> pd.DataFrame:
-        """
-        Take a DataFrame as entry and set the column timestamp_column_name as index.
-
-        It also removes duplicate lines.
-
-        :param pandas.DataFrame data: The data in form of pandas.DataFrame.
-        :param str index_column_name: Name of the index column.
-        :param str new_index_name: The new name of the index. Used to raplace index_column_name.
-        :param bool ascending_order: Sort the DataFrame in ascending order.
-        :param bool is_timestamp: Is the index column in form of timestamp.
-        :param str unit: Used only when is_timestamp is true.
-        """
-
-        if self.data.index.name == index_column_name:
-            self.data.reset_index(inplace=True)
-
-        if index_column_name not in set(self.data.columns):
-            raise Exception(f"Column {index_column_name} is not in the DataFrame.")
-
-        column_name = index_column_name
-        if new_index_name is not None:
-            self.data.rename(columns={index_column_name: new_index_name}, inplace=True)
-            column_name = new_index_name
-
-        if drop_duplicates:
-            self.data.drop_duplicates(subset=column_name, keep="first", inplace=True)
-
-        if is_timestamp:
-            self.data[column_name] = pd.to_datetime(self.data[column_name], infer_datetime_format=True, unit=unit)
-
-        if self.data.index.name != column_name:
-            self.data.set_index(column_name, inplace=True)
-
-        self.data.sort_index(ascending=ascending_order, inplace=True)
-
-        return self.data
-
+    # region other functions
     @staticmethod
     def nig_variates(a: float, b: float, loc: float = 0, scale: float = 1, size: int = 1,
                      random_state: int = None) -> np.ndarray:
@@ -122,14 +92,16 @@ class Indicators:
         mean, std = norm.fit(data)
 
         return mean, std
+    # endregion
 
+    # region indicators
     @staticmethod
     def moving_window_functions(data: pd.DataFrame, columns: Union[List[str], str],
                                 functions: List[str] = ["mean"],
                                 window: int = 14, quantile: float = 0.05,
                                 result_names: Dict[str, List[str]] = {"mean": ["SMA"]},
-                                add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
-                                *args, **kwargs) -> pd.DataFrame:
+                                is_parallel_computing: bool = False, add_to_data: bool = True,
+                                ml_format: Union[Callable, bool] = None, *args, **kwargs) -> pd.DataFrame:
         """
         Provide rolling window calculations.
 
@@ -141,6 +113,7 @@ class Indicators:
         :param window: Length of the window.
         :param quantile: quantile in ]0,1[ when we want to compute a quantile of the window.
         :param result_names: Prefix for the name of the column.
+        :param is_parallel_computing: Use parallel computing with numba.
         :param add_to_data: Specify whether to add the result to DataFrame or not.
         :param ml_format: Specify a callable to apply to the result or True to apply the default one.
         :return: pandas.DataFrame object.
@@ -176,8 +149,11 @@ class Indicators:
 
                 elif isinstance(ml_format, bool):
                     if ml_format:
-                        df.loc[:, target_columns_names] = np.log(df[target_columns_names].values
-                                                                 / data[src_columns].values)
+                        df = pd.DataFrame(data=numpy_log(is_parallel_computing,
+                                                         numpy_div(is_parallel_computing,
+                                                                   df[target_columns_names].values,
+                                                                   data[src_columns].values)),
+                                          columns=target_columns_names, index=df.index)
 
                 else:
                     raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
@@ -199,7 +175,8 @@ class Indicators:
                                  *args, **kwargs) -> pd.DataFrame:
 
         return self.moving_window_functions(self._data, columns, functions, window, quantile,
-                                            result_names, add_to_data, ml_format, *args, **kwargs)
+                                            result_names, self.is_parallel_computing, add_to_data, ml_format,
+                                            *args, **kwargs)
 
     def moving_average(self, columns: Union[List[str], str], window: int = 14, result_names: List[str] = None,
                        add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
@@ -313,14 +290,16 @@ class Indicators:
         return df
 
     def true_range(self, close_name: str = "close", high_name: str = "high", low_name: str = "low",
-                   window: int = 1, result_names: str = None, add_to_data: bool = True,
-                   ml_format: Union[Callable, bool] = None, *args, **kwargs) -> pd.DataFrame:
+                   window: int = 1, result_names: str = None, is_parallel: bool = False,
+                   add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                   *args, **kwargs) -> pd.DataFrame:
         if result_names is None:
             result_names = "TR_" + str(window)
 
         df_close = self.data[close_name].shift(1)
-        df = pd.DataFrame(pd.concat([self.data[high_name], df_close], axis=1).max(axis=1)
-                          - pd.concat([self.data[low_name], df_close], axis=1).min(axis=1), columns=[result_names])
+        d1 = pd.concat([self.data[high_name], df_close], axis=1).max(axis=1)
+        d2 = pd.concat([self.data[low_name], df_close], axis=1).min(axis=1)
+        df = pd.DataFrame(numpy_sub(is_parallel, d1.values, d2.values), columns=[result_names], index=self.data.index)
 
         if window > 1:
             df = df.rolling(window=window).mean()
@@ -335,8 +314,11 @@ class Indicators:
                     columns = list(set(columns) - (set(columns) - set(self.data.columns)))
                     new_columns = [result_names + "_velocity_" + x for x in columns]
 
-                    df = pd.DataFrame(np.log(df[[result_names]*len(columns)].values / self.data[columns].values),
+                    df = pd.DataFrame(numpy_log(is_parallel, numpy_div(is_parallel,
+                                                                       df[[result_names]*len(columns)].values,
+                                                                       self.data[columns].values)),
                                       columns=new_columns, index=df.index)
+
                     result_names = new_columns
 
             else:
@@ -349,8 +331,9 @@ class Indicators:
             return df
 
     def average_true_range(self, close_name: str = "close", high_name: str = "high", low_name: str = "low",
-                           window: int = 1, result_names: str = None, add_to_data: bool = True,
-                           ml_format: Union[Callable, bool] = None, *args, **kwargs) -> pd.DataFrame:
+                           window: int = 1, result_names: str = None, is_parallel: bool = False,
+                           add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                           *args, **kwargs) -> pd.DataFrame:
         if result_names is None:
             result_names = "ATR_" + str(window)
 
@@ -371,9 +354,12 @@ class Indicators:
                     columns = list(set(columns) - (set(columns) - set(self.data.columns)))
                     new_columns = [result_names + "_velocity_" + x for x in columns]
 
-                    df_atr = pd.DataFrame(np.log(df_atr[[result_names]*len(columns)].values
-                                                 / self.data[columns].values),
+                    df_atr = pd.DataFrame(numpy_log(is_parallel,
+                                                    numpy_div(is_parallel,
+                                                              df_atr[[result_names]*len(columns)].values,
+                                                              self.data[columns].values)),
                                           columns=new_columns, index=df_atr.index)
+
                     result_names = new_columns
 
             else:
@@ -387,7 +373,7 @@ class Indicators:
 
     def average_directional_index(self, close_name: str = "close", high_name: str = "high",
                                   low_name: str = "low", window: int = 14, result_name: str = None,
-                                  add_to_data: bool = True) -> pd.DataFrame:
+                                  is_parallel: bool = False, add_to_data: bool = True) -> pd.DataFrame:
 
         """
         Implements the Average Directional Index using the formula from https://www.investopedia.com/terms/a/adx.asp and
@@ -401,13 +387,13 @@ class Indicators:
         if not isinstance(result_name, str):
             raise Exception("Parameter result_name should be a string.")
 
-        m_positive = self.data[high_name].values - self.data[high_name].shift(1).values
-        m_negative = self.data[low_name].shift(1).values - self.data[low_name].values
+        m_positive = numpy_sub(is_parallel, self.data[high_name].values, self.data[high_name].shift(1).values)
+        m_negative = numpy_sub(is_parallel, self.data[low_name].shift(1).values, self.data[low_name].values)
 
         dm_positive = m_positive.copy()
         with np.errstate(invalid='ignore'):
             dm_positive[(m_positive < m_negative) | (m_positive < 0)] = 0
-        df = pd.DataFrame(dm_positive, columns=["DMp"])
+        df = pd.DataFrame(dm_positive, columns=["DMp"], index=self.data.index)
         smoothed_dm_positive = self.exponential_weighted_functions(df, "DMp", functions=["mean"],
                                                                    result_names={'mean': ["SDMp"]},
                                                                    alpha=1.0 / window, add_to_data=False)
@@ -415,23 +401,27 @@ class Indicators:
         dm_negative = m_negative.copy()
         with np.errstate(invalid='ignore'):
             dm_negative[(m_negative < m_positive) | (m_negative < 0)] = 0
-        df = pd.DataFrame(dm_negative, columns=["DMn"])
+        df = pd.DataFrame(dm_negative, columns=["DMn"], index=self.data.index)
         smoothed_dm_negative = self.exponential_weighted_functions(df, "DMn", functions=["mean"],
                                                                    result_names={'mean': ["SDMn"]},
                                                                    alpha=1.0 / window, add_to_data=False)
 
         # DI+ and DI-
         atr = self.average_true_range(close_name, high_name, low_name, window, "ATR", False)
-        directional_index_positive = pd.DataFrame((smoothed_dm_positive["SDMp"].values / atr["ATR"].values) * 100,
-                                                  columns=["DIp_" + str(window)], index=atr.index)
-        directional_index_negative = pd.DataFrame((smoothed_dm_negative["SDMn"].values / atr["ATR"].values) * 100,
-                                                  columns=["DIn_" + str(window)], index=atr.index)
+
+        d1 = numpy_mul(is_parallel, numpy_div(is_parallel, smoothed_dm_positive["SDMp"].values, atr["ATR"].values), 100)
+        directional_index_positive = pd.DataFrame(d1, columns=["DIp_" + str(window)], index=atr.index)
+
+        d1 = numpy_mul(is_parallel, numpy_div(is_parallel, smoothed_dm_negative["SDMn"].values, atr["ATR"].values), 100)
+        directional_index_negative = pd.DataFrame(d1, columns=["DIn_" + str(window)], index=atr.index)
 
         # DXI
-        dxi = pd.DataFrame(100 * np.abs(directional_index_positive["DIp_" + str(window)].values
-                                        - directional_index_negative["DIn_" + str(window)].values)
-                           / np.abs(directional_index_positive["DIp_" + str(window)].values
-                                    + directional_index_negative["DIn_" + str(window)].values),
+        d1 = numpy_abs(is_parallel, numpy_sub(is_parallel, directional_index_positive["DIp_" + str(window)].values,
+                                              directional_index_negative["DIn_" + str(window)].values))
+        d2 = numpy_abs(is_parallel, numpy_add(is_parallel, directional_index_positive["DIp_" + str(window)].values,
+                                              directional_index_negative["DIn_" + str(window)].values))
+
+        dxi = pd.DataFrame(numpy_mul(is_parallel, numpy_div(is_parallel, d1, d2), 100),
                            columns=["DXI_" + str(window)], index=directional_index_positive.index)
 
         # ADX
@@ -447,8 +437,9 @@ class Indicators:
             return df
 
     def moving_average_channel(self, columns: Union[List[str], str], window: int = 1, nb_of_deviations: int = 3,
-                               result_names: List[str] = None, add_to_data: bool = True,
-                               ml_format: Union[Callable, bool] = None, *args, **kwargs) -> pd.DataFrame:
+                               result_names: List[str] = None, is_parallel: bool = False,
+                               add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                               *args, **kwargs) -> pd.DataFrame:
         if result_names is None:
             result_names = ["MAChannel" + str(window) + "_" + str(nb_of_deviations) + "_" + col for col in columns]
 
@@ -464,11 +455,15 @@ class Indicators:
         upper_channel_names = [col + "_UP" for col in result_names]
         down_channel_names = [col + "_DOWN" for col in result_names]
 
-        result_df = pd.concat([result_df,
-                               pd.DataFrame(result_df.values + nb_of_deviations * std.values,
-                                            columns=upper_channel_names, index=result_df.index),
-                               pd.DataFrame(result_df.values - nb_of_deviations * std.values,
-                                            columns=down_channel_names, index=result_df.index)], axis=1)
+        d1 = pd.DataFrame(numpy_add(is_parallel, result_df.values,
+                                    numpy_mul(is_parallel, std.values, nb_of_deviations)),
+                          columns=upper_channel_names, index=result_df.index)
+
+        d2 = pd.DataFrame(numpy_sub(is_parallel, result_df.values,
+                                    numpy_mul(is_parallel, std.values, nb_of_deviations)),
+                          columns=down_channel_names, index=result_df.index)
+
+        result_df = pd.concat([result_df, d1, d2], axis=1)
 
         if ml_format is not None:
             if callable(ml_format):
@@ -478,9 +473,13 @@ class Indicators:
             elif isinstance(ml_format, bool):
                 if ml_format:
                     col_list = average_names + upper_channel_names + down_channel_names
-                    result_df[col_list] = pd.DataFrame(np.log(result_df[col_list].values
-                                                              / self.data[columns*3].values),
-                                                       columns=col_list, index=result_df.index)
+
+                    d1 = pd.DataFrame(numpy_log(is_parallel,
+                                                numpy_div(is_parallel, result_df[col_list].values,
+                                                          self.data[columns*3].values)),
+                                      columns=col_list, index=result_df.index)
+
+                    result_df[col_list] = d1
 
             else:
                 raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
@@ -498,14 +497,16 @@ class Indicators:
                                         *args, **kwargs) -> pd.DataFrame:
 
         return self.exponential_weighted_functions(self.data, columns, functions, span, com, halflife, alpha, adjust,
-                                                   result_names, add_to_data, ml_format, *args, **kwargs)
+                                                   result_names, self.is_parallel_computing, add_to_data,
+                                                   ml_format, *args, **kwargs)
 
     @staticmethod
     def exponential_weighted_functions(data: pd.DataFrame, columns: Union[List[str], str],
                                        functions: List[str] = ["mean"], span: Any = None, com: Any = None,
                                        halflife: Any = None, alpha: Any = None, adjust: bool = True,
                                        result_names: Dict[str, List[str]] = {"mean": ["EMA"]},
-                                       add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                                       is_parallel: bool = False, add_to_data: bool = True,
+                                       ml_format: Union[Callable, bool] = None,
                                        *args, **kwargs) -> pd.DataFrame:
         """
         Provide exponential weighted functions.
@@ -521,6 +522,7 @@ class Indicators:
         :param alpha: Specify smoothing factor α directly, 0<α≤1.
         :param adjust: Divide by decaying adjustment factor in beginning periods to account for imbalance.
         :param result_names: Prefix for the name of the column.
+        :param is_parallel: Use parallel computing with numba.
         :param add_to_data: Specify whether to add the result to DataFrame or not.
         :param ml_format: Specify a callable to apply to the result or True to apply the default one.
         :return: pandas.DataFrame object.
@@ -563,8 +565,10 @@ class Indicators:
 
                 elif isinstance(ml_format, bool):
                     if ml_format:
-                        df.loc[:, target_columns_names] = np.log(df[target_columns_names].values
-                                                                 / data[src_columns].values)
+                        d1 = numpy_div(is_parallel, df[target_columns_names].values, data[src_columns].values)
+                        d1 = numpy_log(is_parallel, d1)
+
+                        df = pd.DataFrame(d1, columns=target_columns_names, index=df.index)
 
                 else:
                     raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
@@ -636,7 +640,8 @@ class Indicators:
     def exponential_weighted_moving_average_channel(self, columns: Union[List[str], str], span: Any = None,
                                                     com: Any = None, halflife: Any = None, alpha: Any = None,
                                                     nb_of_deviations: int = 3, result_names: List[str] = None,
-                                                    add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                                                    is_parallel: bool = False, add_to_data: bool = True,
+                                                    ml_format: Union[Callable, bool] = None,
                                                     *args, **kwargs) -> pd.DataFrame:
         if result_names is None:
             result_names = ["EMAChannel" + "_" + str(nb_of_deviations) + "_" + col for col in columns]
@@ -655,11 +660,15 @@ class Indicators:
         upper_channel_names = [col + "_UP" for col in result_names]
         down_channel_names = [col + "_DOWN" for col in result_names]
 
-        result_df = pd.concat([result_df,
-                               pd.DataFrame(result_df.values + nb_of_deviations * std.values,
-                                            columns=upper_channel_names, index=result_df.index),
-                               pd.DataFrame(result_df.values - nb_of_deviations * std.values,
-                                            columns=down_channel_names, index=result_df.index)], axis=1)
+        d1 = pd.DataFrame(numpy_add(is_parallel, result_df.values,
+                                    numpy_mul(is_parallel, std.values, nb_of_deviations)),
+                          columns=upper_channel_names, index=result_df.index)
+
+        d2 = pd.DataFrame(numpy_sub(is_parallel, result_df.values,
+                                    numpy_mul(is_parallel, std.values, nb_of_deviations)),
+                          columns=down_channel_names, index=result_df.index)
+
+        result_df = pd.concat([result_df, d1, d2], axis=1)
 
         if ml_format is not None:
             col_list = average_names + upper_channel_names + down_channel_names
@@ -669,9 +678,10 @@ class Indicators:
 
             elif isinstance(ml_format, bool):
                 if ml_format:
-                    result_df[col_list] = pd.DataFrame(np.log(result_df[col_list].values
-                                                       / self.data[columns * 3].values),
-                                                       columns=col_list, index=result_df.index)
+                    d1 = numpy_div(is_parallel, result_df[col_list].values, self.data[columns*3].values)
+                    d1 = numpy_log(is_parallel, d1)
+
+                    result_df[col_list] = pd.DataFrame(d1, columns=col_list, index=result_df.index)
 
             else:
                 raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
@@ -683,8 +693,8 @@ class Indicators:
             return result_df
 
     def hull_moving_average(self, columns: Union[List[str], str], window: int = 1, result_names: List[str] = None,
-                            add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
-                            *args, **kwargs) -> pd.DataFrame:
+                            is_parallel: bool = False, add_to_data: bool = True,
+                            ml_format: Union[Callable, bool] = None, *args, **kwargs) -> pd.DataFrame:
         if result_names is None:
             result_names = ["HullMA" + "_" + col for col in columns]
 
@@ -705,7 +715,10 @@ class Indicators:
 
             elif isinstance(ml_format, bool):
                 if ml_format:
-                    df_nsqrt[result_names] = np.log(df_nsqrt[result_names] / self.data[columns].values)
+                    d1 = numpy_div(is_parallel, df_nsqrt[result_names].values, self.data[columns].values)
+                    d1 = numpy_log(is_parallel, d1)
+
+                    df_nsqrt[result_names] = pd.DataFrame(d1, columns=result_names, index=df_nsqrt.index)
 
             else:
                 raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
@@ -715,6 +728,47 @@ class Indicators:
             return self.data
         else:
             return df_nsqrt
+    # endregion
 
+    # region utils
+    def set_index(self, index_column_name: str, new_index_name: str = None, ascending_order: bool = True,
+                  is_timestamp: bool = False, unit: str = 's', drop_duplicates: bool = True) -> pd.DataFrame:
+        """
+        Take a DataFrame as entry and set the column timestamp_column_name as index.
+
+        It also removes duplicate lines.
+
+        :param pandas.DataFrame data: The data in form of pandas.DataFrame.
+        :param str index_column_name: Name of the index column.
+        :param str new_index_name: The new name of the index. Used to raplace index_column_name.
+        :param bool ascending_order: Sort the DataFrame in ascending order.
+        :param bool is_timestamp: Is the index column in form of timestamp.
+        :param str unit: Used only when is_timestamp is true.
+        """
+
+        if self.data.index.name == index_column_name:
+            self.data.reset_index(inplace=True)
+
+        if index_column_name not in set(self.data.columns):
+            raise Exception(f"Column {index_column_name} is not in the DataFrame.")
+
+        column_name = index_column_name
+        if new_index_name is not None:
+            self.data.rename(columns={index_column_name: new_index_name}, inplace=True)
+            column_name = new_index_name
+
+        if drop_duplicates:
+            self.data.drop_duplicates(subset=column_name, keep="first", inplace=True)
+
+        if is_timestamp:
+            self.data[column_name] = pd.to_datetime(self.data[column_name], infer_datetime_format=True, unit=unit)
+
+        if self.data.index.name != column_name:
+            self.data.set_index(column_name, inplace=True)
+
+        self.data.sort_index(ascending=ascending_order, inplace=True)
+
+        return self.data
+    # endregion
 
 

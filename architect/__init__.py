@@ -396,12 +396,17 @@ class MLArchitect:
                 raise Exception("'indicators_callable' not recognized as a callable object.")
 
     @staticmethod
-    def compute_indicators(original_data: pd.DataFrame, inplace: bool = True):
+    def compute_indicators(original_data: pd.DataFrame, ascending_order: bool = True,
+                           drop_duplicates: bool = True, inplace: bool = True):
         data = original_data if inplace else original_data.copy()
         ind_obj = Indicators(data)
         proc_object = ind_obj.preprocessing
 
         src_columns = ["open", "close", "high", "low"]
+
+        # Sorting and Dropping duplicates from index
+        ind_obj.set_index(index_column_name=data.index.name, ascending_order=ascending_order,
+                          drop_duplicates=drop_duplicates)
 
         # Quantile 0.05 and 0.95
         ind_obj.moving_quantile(columns=src_columns, quantile=0.01, window=14,
@@ -476,8 +481,8 @@ class MLArchitect:
             if isinstance(normalize_x_callable, str):
                 if normalize_x_callable == "default_normalizer":
                     self._x_norm_model = self._default_normalizer(self.x_train, add_standard_scaling=True,
-                                                                  min_max_range=(-1, 1),
                                                                   add_power_transform=True,
+                                                                  min_max_range=(-1, 1),
                                                                   pca_n_components=self._pca_n_components,
                                                                   save_normalize_x_model=save_normalize_x_model)
 
@@ -717,7 +722,7 @@ class MLArchitect:
         predicted = pd.concat([y_predicted, df], axis=0)
 
         if is_returns:
-            df = pd.DataFrame(flat_data.loc[predicted.index] * np.exp(predicted.values))
+            df = pd.DataFrame(flat_data.loc[predicted.index, :] * np.exp(predicted.values))
         else:
             df = predicted
 

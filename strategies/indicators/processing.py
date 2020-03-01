@@ -4,7 +4,10 @@ Input for each function is a Pandas Dataframe.
 """
 
 from typing import List, Union
+from .optim import *
+
 from .utils import _get_columns
+
 import pandas as pd
 import numpy as np
 
@@ -27,15 +30,15 @@ class ProcessingIndicators:
 
     def substract(self, left_columns: Union[List[str], str], right_columns: Union[List[str], str],
                   result_names: Union[List[str], str], add_to_data: bool = True, delete_left_from_data: bool = False,
-                  delete_right_from_data: bool = False) -> pd.DataFrame:
+                  delete_right_from_data: bool = False, is_parallel: bool = False) -> pd.DataFrame:
 
         left_col, right_col, res_names = _get_columns(left_columns), _get_columns(right_columns), _get_columns(result_names)
 
         if len(left_col) != len(right_col) or len(result_names) != len(right_col):
             raise Exception("Parameters left_columns and right_columns should have the same length.")
 
-        df = pd.DataFrame(self.data[left_col].values - self.data[right_col].values, columns=res_names)
-        df.index = self.data.index
+        d1 = numpy_sub(is_parallel, self.data[left_col].values, self.data[right_col].values)
+        df = pd.DataFrame(d1, columns=res_names, index=self.data.index)
 
         drop_columns = []
         if delete_left_from_data:
@@ -55,14 +58,15 @@ class ProcessingIndicators:
             return df
 
     def log_returns(self, columns: Union[List[str], str], result_names: Union[List[str], str], window: int = 1,
-                    add_to_data: bool = True, delete_columns: bool = False) -> pd.DataFrame:
+                    add_to_data: bool = True, delete_columns: bool = False, is_parallel: bool = False) -> pd.DataFrame:
 
         src_columns, target_columns_names = _get_columns(columns), _get_columns(result_names)
 
         if len(src_columns) != len(target_columns_names):
             raise Exception("Parameters columns and result_names should have the same length.")
 
-        df = np.log(self.data[src_columns] / self.data[src_columns].shift(periods=window))
+        d1 = numpy_div(is_parallel, self.data[src_columns].values, self.data[src_columns].shift(periods=window).values)
+        df = pd.DataFrame(numpy_log(is_parallel, d1), columns=src_columns, index=self.data.index)
 
         if add_to_data:
             self.data[result_names] = df
