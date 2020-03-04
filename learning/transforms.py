@@ -1,7 +1,7 @@
 from sklearn import preprocessing, decomposition
 from sklearn import model_selection
 from joblib import dump, load
-from typing import List
+from typing import List, Union
 import pandas as pd
 #import numpy as np
 
@@ -66,14 +66,6 @@ class Normalization:
 
         scale = preprocessing.MinMaxScaler(feature_range=min_max_range)
 
-        # # Apply the previous scaling methods
-        # transformed_data = self.transform(data)
-        #
-        # if min_max_scale_columns:
-        #     scale = scale.fit(transformed_data[min_max_scale_columns])
-        # else:
-        #     scale = scale.fit(transformed_data)
-
         self._normalization_steps.append((scale, min_max_scale_columns))
 
     def add_standard_scaling(self, data: object, standard_scale_columns: List[str] = None):
@@ -88,14 +80,6 @@ class Normalization:
         """
 
         scale = preprocessing.StandardScaler()
-
-        # # Apply the previous scaling methods
-        # transformed_data = self.transform(data)
-        #
-        # if standard_scale_columns:
-        #     scale = scale.fit(transformed_data[standard_scale_columns])
-        # else:
-        #     scale = scale.fit(transformed_data)
 
         self._normalization_steps.append((scale, standard_scale_columns))
 
@@ -113,14 +97,6 @@ class Normalization:
         :return:
         """
         scale = preprocessing.PowerTransformer(method=gaussian_like_method, standardize=standardize)
-
-        # # Apply the previous scaling methods
-        # transformed_data = self.transform(data)
-        #
-        # if gaussian_like_scale_columns:
-        #     scale = scale.fit(transformed_data[gaussian_like_scale_columns])
-        # else:
-        #     scale = scale.fit(transformed_data)
 
         self._normalization_steps.append((scale, gaussian_like_scale_columns))
 
@@ -231,4 +207,12 @@ class Normalization:
         else:
             return None
 
+    def add_kernel_pca_reduction(self, n_components: int = None,
+                                 kernel: str = Union['linear', 'poly', 'rbf', 'sigmoid', 'cosine', 'precomputed'],
+                                 gamma: float = None, degree: int = 3, coef0: float = 1, n_jobs: int = -1,
+                                 remove_zero_eig: bool = False, fit_inverse_transform: bool = False, **kwargs):
+        # n_components can also be 'mle' or a number in [0,1]
+        self._pca = decomposition.KernelPCA(n_components=n_components, kernel=kernel, gamma=gamma, degree=degree,
+                                            coef0=coef0, fit_inverse_transform=fit_inverse_transform, n_jobs=-1,
+                                            remove_zero_eig=remove_zero_eig, **kwargs)
 
