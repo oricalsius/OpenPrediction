@@ -22,7 +22,7 @@ class MLArchitect:
                  y_restoration_routine: Any = "default",
                  normalize_x_callable: Any = "default_normalizer", save_normalize_x_model: str = None,
                  normalize_y_callable: Any = "default_normalizer", save_normalize_y_model: str = None,
-                 window_prediction: int = 4, test_size: float = 0.1, random_state: int = 0,
+                 window_prediction: int = 4, test_size: float = 0.1, random_state: int = 0, add_pca: bool = False,
                  pca_n_components: float = 0.95, ml_model: Any = None, save_ml_path: str = None):
 
         # Variable initializing
@@ -67,6 +67,7 @@ class MLArchitect:
 
         # Normalize train and test x
         self._x_norm_model = None
+        self._add_pca = add_pca
         self._pca_n_components = pca_n_components
         self.norm_input_fit(normalize_x_callable, save_normalize_x_model)
 
@@ -289,14 +290,12 @@ class MLArchitect:
                           drop_duplicates=drop_duplicates)
 
         # Simple moving average, std
-        ind_obj.moving_average(columns=src_columns, window=14, result_names=[x + "_avg_14" for x in src_columns],
-                               ml_format=True)
         ind_obj.moving_std(columns=src_columns, window=14, result_names=[x + "_std_14" for x in src_columns],
                            ml_format=True)
 
         # Quantile 0.05 and 0.95
         ind_obj.moving_quantile(columns=src_columns, quantile=0.05, window=14, ml_format=True,
-                                result_names=[x + "_q_95" for x in src_columns])
+                                result_names=[x + "_q_05" for x in src_columns])
 
         ind_obj.moving_quantile(columns=src_columns, quantile=0.95, window=14, ml_format=True,
                                 result_names=[x + "_q_95" for x in src_columns])
@@ -332,6 +331,32 @@ class MLArchitect:
 
         # Average Directional Index
         ind_obj.average_directional_index(result_name="adx_14", window=14)
+
+        # Custom Returns Directional Index
+        ind_obj.returns_dix(columns=src_columns, result_names=[x + "_rdix_5" for x in src_columns], window=5)
+        ind_obj.returns_dix_average(columns=src_columns, result_names=[x + "_rdix_avg_14" for x in src_columns],
+                                    window=14)
+
+        ind_obj.returns_square_dix(columns=src_columns, result_names=[x + "_square_rdix_5" for x in src_columns],
+                                   window=5)
+        ind_obj.returns_square_dix_average(columns=src_columns, window=14,
+                                           result_names=[x + "_square_rdix_avg_14" for x in src_columns])
+
+        ind_obj.returns_norm_dix(columns=src_columns, window=5,
+                                 result_names=[x + "_norm_rdix_5" for x in src_columns])
+
+        ind_obj.returns_norm_dix_average(columns=src_columns, window=14,
+                                         result_names=[x + "_norm_rdix_avg_14" for x in src_columns])
+
+        ind_obj.price_velocity(columns=src_columns, window=5,
+                               result_names=[x + "_PriceVelo_5" for x in src_columns], ml_format=True)
+        ind_obj.price_velocity_average(columns=src_columns, window=14,
+                                       result_names=[x + "_PriceVelo_avg_14" for x in src_columns], ml_format=True)
+
+        ind_obj.returns_velocity(columns=src_columns, window=5,
+                                 result_names=[x + "_ReturnsVelo_5" for x in src_columns])
+        ind_obj.returns_velocity_average(columns=src_columns, window=14,
+                                         result_names=[x + "_ReturnsVelo_avg_14" for x in src_columns])
 
         # Exponential Moving average
         ind_obj.exponential_weighted_moving_average(columns=src_columns, span=14, ml_format=True,
@@ -448,6 +473,32 @@ class MLArchitect:
         ind_obj.hull_moving_average(columns=src_columns, result_names=[x + "_hull_14" for x in src_columns], window=14,
                                     ml_format=False)
 
+        # Custom Returns Directional Index
+        ind_obj.returns_dix(columns=src_columns, result_names=[x + "_rdix_5" for x in src_columns], window=5)
+        ind_obj.returns_dix_average(columns=src_columns, result_names=[x + "_rdix_avg_14" for x in src_columns],
+                                    window=14)
+
+        ind_obj.returns_square_dix(columns=src_columns, result_names=[x + "_square_rdix_5" for x in src_columns],
+                                   window=5)
+        ind_obj.returns_square_dix_average(columns=src_columns, window=14,
+                                           result_names=[x + "_square_rdix_avg_14" for x in src_columns])
+
+        ind_obj.returns_norm_dix(columns=src_columns, window=5,
+                                 result_names=[x + "_norm_rdix_5" for x in src_columns])
+
+        ind_obj.returns_norm_dix_average(columns=src_columns, window=14,
+                                         result_names=[x + "_norm_rdix_avg_14" for x in src_columns])
+
+        ind_obj.price_velocity(columns=src_columns, window=5, ml_format=True,
+                               result_names=[x + "_PriceVelo_5" for x in src_columns])
+        ind_obj.price_velocity_average(columns=src_columns, window=14,
+                                       result_names=[x + "_PriceVelo_avg_14" for x in src_columns], ml_format=True)
+
+        ind_obj.returns_velocity(columns=src_columns, window=5,
+                                 result_names=[x + "_ReturnsVelo_5" for x in src_columns])
+        ind_obj.returns_velocity_average(columns=src_columns, window=14,
+                                         result_names=[x + "_ReturnsVelo_avg_14" for x in src_columns])
+
         # Raise Velocity = (high-low)/amount
         data["high_low_raise_velocity"] = pd.DataFrame((data["high"].values - data["low"].values)
                                                        / data["amount"].values,
@@ -482,7 +533,7 @@ class MLArchitect:
                 if normalize_x_callable == "default_normalizer":
                     self._x_norm_model = self._default_normalizer(self.x_train, add_standard_scaling=True,
                                                                   add_power_transform=True,
-                                                                  min_max_range=(-1, 1),
+                                                                  min_max_range=(-1, 1), add_pca=self._add_pca,
                                                                   pca_n_components=self._pca_n_components,
                                                                   save_normalize_x_model=save_normalize_x_model)
 
@@ -567,7 +618,7 @@ class MLArchitect:
     @staticmethod
     def _default_normalizer(data_to_fit: pd.DataFrame, min_max_range: Union[None, tuple] = None,
                             add_standard_scaling: bool = False, add_power_transform: bool = False,
-                            pca_n_components: float = -1, save_normalize_x_model: str = None):
+                            add_pca: bool = False, pca_n_components: float = None, save_normalize_x_model: str = None):
 
         norm_object = Normalization()
         if add_standard_scaling:
@@ -583,8 +634,9 @@ class MLArchitect:
             #norm_object.add_min_max_scaling(data_to_fit, min_max_range=min_max_range)
 
         # Apply PCA reduction to data_to_fit
-        if pca_n_components > 0:
-            norm_object.add_pca_reduction(pca_n_components, svd_solver="full")
+        if add_pca:
+            #norm_object.add_pca_reduction(pca_n_components, svd_solver="full")
+            norm_object.add_kernel_pca_reduction(pca_n_components, kernel='linear', n_jobs=-1)
 
         norm_object.fit(data_to_fit)
 

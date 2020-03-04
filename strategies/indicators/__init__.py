@@ -371,6 +371,264 @@ class Indicators:
         else:
             return df_atr
 
+    def returns_dix(self, columns: Union[List[str], str], window: int = 1, result_names: Union[List[str], str] = None,
+                    add_to_data: bool = True) -> pd.DataFrame:
+        if result_names is None:
+            result_names = [col + "RDIX_" + str(window) for col in columns]
+
+        src_columns = _get_columns(columns)
+        is_parallel = self.is_parallel_computing
+
+        # Compute returns
+        d1 = numpy_div(is_parallel, self.data[src_columns].values, self.data[src_columns].shift(1).values)
+        df = pd.DataFrame(numpy_log(is_parallel, d1), columns=src_columns, index=self.data.index)
+
+        # Rolling window
+        rol = df.rolling(window=window)
+        abs_rol = df.abs().rolling(window=window)
+
+        df = pd.DataFrame(numpy_div(is_parallel, rol.sum().values, abs_rol.sum().values + np.finfo(float).eps),
+                          columns=result_names, index=df.index)
+
+        if add_to_data:
+            self.data[result_names] = df
+            return self.data
+        else:
+            return df
+
+    def returns_dix_average(self, columns: Union[List[str], str], window: int = 1,
+                            result_names: Union[List[str], str] = None, add_to_data: bool = True) -> pd.DataFrame:
+        if result_names is None:
+            result_names = ["RDIX_avg_" + str(window) + col for col in columns]
+
+        src_columns = _get_columns(columns)
+
+        target_name = ["RDIX_temp_" + x for x in src_columns]
+        df_rdix = self.returns_dix(columns=columns, window=window, result_names=target_name, add_to_data=False)
+
+        df_rdix_avg = self.exponential_weighted_functions(df_rdix, target_name, functions=["mean"], alpha=1.0 / window,
+                                                          result_names={'mean': result_names}, add_to_data=False)
+
+        if add_to_data:
+            self.data[result_names] = df_rdix_avg
+            return self.data
+        else:
+            return df_rdix_avg
+
+    def returns_square_dix(self, columns: Union[List[str], str], window: int = 1,
+                           result_names: Union[List[str], str] = None, add_to_data: bool = True) -> pd.DataFrame:
+        if result_names is None:
+            result_names = [col + "Square_RDIX_" + str(window) for col in columns]
+
+        src_columns = _get_columns(columns)
+        is_parallel = self.is_parallel_computing
+
+        # Compute returns
+        d1 = numpy_div(is_parallel, self.data[src_columns].values, self.data[src_columns].shift(1).values)
+        df = pd.DataFrame(numpy_log(is_parallel, d1), columns=src_columns, index=self.data.index)
+
+        # Rolling window
+        rol_2 = (df**2).rolling(window=window)
+        rol = df.rolling(window=window)
+
+        df = pd.DataFrame(numpy_div(is_parallel, numpy_mul(is_parallel, rol.sum().values, rol.sum().values),
+                                    rol_2.sum().values+np.finfo(float).eps), columns=result_names, index=df.index)
+
+        if add_to_data:
+            self.data[result_names] = df
+            return self.data
+        else:
+            return df
+
+    def returns_square_dix_average(self, columns: Union[List[str], str], window: int = 1,
+                                   result_names: Union[List[str], str] = None, add_to_data: bool = True) -> pd.DataFrame:
+        if result_names is None:
+            result_names = ["Square_RDIX_avg_" + str(window) + col for col in columns]
+
+        src_columns = _get_columns(columns)
+
+        target_name = ["Square_RDIX_temp_" + x for x in src_columns]
+        sq_rdix = self.returns_square_dix(columns=columns, window=window, result_names=target_name, add_to_data=False)
+
+        df_rdix_avg = self.exponential_weighted_functions(sq_rdix, target_name, functions=["mean"], alpha=1.0 / window,
+                                                          result_names={'mean': result_names}, add_to_data=False)
+
+        if add_to_data:
+            self.data[result_names] = df_rdix_avg
+            return self.data
+        else:
+            return df_rdix_avg
+
+    def returns_norm_dix(self, columns: Union[List[str], str], window: int = 1,
+                         result_names: Union[List[str], str] = None, add_to_data: bool = True) -> pd.DataFrame:
+        if result_names is None:
+            result_names = [col + "Norm_RDIX_" + str(window) for col in columns]
+
+        src_columns = _get_columns(columns)
+        is_parallel = self.is_parallel_computing
+
+        # Compute returns
+        d1 = numpy_div(is_parallel, self.data[src_columns].values, self.data[src_columns].shift(1).values)
+        dr_1 = pd.DataFrame(numpy_log(is_parallel, d1), columns=src_columns, index=self.data.index)
+
+        d1 = numpy_div(is_parallel, self.data[src_columns].values, self.data[src_columns].shift(window).values)
+        dr_w = pd.DataFrame(numpy_log(is_parallel, d1), columns=src_columns, index=self.data.index)
+
+        # Rolling window
+        rol = pd.DataFrame(numpy_mul(is_parallel, dr_1.values, dr_1.values),
+                           columns=src_columns, index=dr_1.index).rolling(window=window)
+
+        df = pd.DataFrame(numpy_div(is_parallel, dr_w.values,
+                                    np.sqrt(rol.sum().values)+np.finfo(float).eps),
+                          columns=result_names, index=dr_w.index)
+
+        if add_to_data:
+            self.data[result_names] = df
+            return self.data
+        else:
+            return df
+
+    def returns_norm_dix_average(self, columns: Union[List[str], str], window: int = 1,
+                                 result_names: Union[List[str], str] = None, add_to_data: bool = True) -> pd.DataFrame:
+        if result_names is None:
+            result_names = ["Norm_RDIX_avg_" + str(window) + col for col in columns]
+
+        src_columns = _get_columns(columns)
+
+        target_name = ["Norm_RDIX_temp_" + x for x in src_columns]
+        nr_rdix = self.returns_norm_dix(columns=columns, window=window, result_names=target_name, add_to_data=False)
+
+        df_rdix_avg = self.exponential_weighted_functions(nr_rdix, target_name, functions=["mean"], alpha=1.0 / window,
+                                                          result_names={'mean': result_names}, add_to_data=False)
+
+        if add_to_data:
+            self.data[result_names] = df_rdix_avg
+            return self.data
+        else:
+            return df_rdix_avg
+
+    def price_velocity(self, columns: Union[List[str], str], window: int = 1,
+                       result_names: Union[List[str], str] = None, add_to_data: bool = True,
+                       ml_format: Union[Callable, bool] = None, *args, **kwargs) -> pd.DataFrame:
+        if result_names is None:
+            result_names = [col + "_PriceVelocity_" + str(window) for col in columns]
+
+        src_columns = _get_columns(columns)
+        is_parallel = self.is_parallel_computing
+
+        df = self.data[src_columns].rolling(window=window)
+        id_max = df.apply(np.argmax, raw=True)
+        id_min = df.apply(np.argmin, raw=True)
+        diff_time = numpy_sub(is_parallel, id_max.values, id_min.values)
+        diff_val = numpy_sub(is_parallel, df.max().values, df.min().values)
+
+        with np.errstate(invalid='ignore'):
+            vel = numpy_mul(is_parallel, np.sign(diff_time),
+                            numpy_div(is_parallel, diff_val, numpy_abs(is_parallel, diff_time) + 1))
+
+        df = pd.DataFrame(vel, columns=result_names, index=id_max.index)
+        if ml_format is not None:
+            if callable(ml_format):
+                df[[result_names]] = ml_format(df[[result_names]], *args, **kwargs)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    df = pd.DataFrame(numpy_div(is_parallel, df[result_names].values,
+                                                self.data[src_columns].values),
+                                      columns=df.columns, index=df.index)
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
+
+        if add_to_data:
+            self.data[result_names] = df
+            return self.data
+        else:
+            return df
+
+    def price_velocity_average(self, columns: Union[List[str], str], window: int = 1,
+                               result_names: Union[List[str], str] = None, add_to_data: bool = True,
+                               ml_format: Union[Callable, bool] = None, *args, **kwargs) -> pd.DataFrame:
+        if result_names is None:
+            result_names = [col + "_PriceVelocity_avg_" + str(window) for col in columns]
+
+        src_columns = _get_columns(columns)
+        is_parallel = self.is_parallel_computing
+
+        target_name = [x + "_PriceVelocity_temp" for x in src_columns]
+        pv = self.price_velocity(columns=src_columns, window=window, result_names=target_name, add_to_data=False)
+
+        pv_avg = self.exponential_weighted_functions(pv, target_name, functions=["mean"], alpha=1.0 / window,
+                                                     result_names={'mean': result_names}, add_to_data=False)
+
+        if ml_format is not None:
+            if callable(ml_format):
+                pv_avg[[result_names]] = ml_format(pv_avg[[result_names]], *args, **kwargs)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    pv_avg = pd.DataFrame(numpy_div(is_parallel, pv_avg[result_names].values,
+                                                    self.data[src_columns].values),
+                                          columns=pv_avg.columns, index=pv_avg.index)
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
+
+        if add_to_data:
+            self.data[result_names] = pv_avg
+            return self.data
+        else:
+            return pv_avg
+
+    def returns_velocity(self, columns: Union[List[str], str], window: int = 1,
+                       result_names: Union[List[str], str] = None, add_to_data: bool = True) -> pd.DataFrame:
+        if result_names is None:
+            result_names = [col + "_ReturnsVelocity_" + str(window) for col in columns]
+
+        src_columns = _get_columns(columns)
+        is_parallel = self.is_parallel_computing
+
+        # Compute returns
+        d1 = numpy_div(is_parallel, self.data[src_columns].values, self.data[src_columns].shift(1).values)
+        ret = pd.DataFrame(numpy_log(is_parallel, d1), columns=src_columns, index=self.data.index)
+
+        df = ret.rolling(window=window)
+        id_max = df.apply(np.argmax, raw=True)
+        id_min = df.apply(np.argmin, raw=True)
+        diff_time = numpy_sub(is_parallel, id_max.values, id_min.values)
+        diff_val = numpy_sub(is_parallel, df.max().values, df.min().values)
+
+        with np.errstate(invalid='ignore'):
+            vel = numpy_mul(is_parallel, np.sign(diff_time),
+                            numpy_div(is_parallel, diff_val, numpy_abs(is_parallel, diff_time) + 1))
+
+        df = pd.DataFrame(vel, columns=result_names, index=id_max.index)
+
+        if add_to_data:
+            self.data[result_names] = df
+            return self.data
+        else:
+            return df
+
+    def returns_velocity_average(self, columns: Union[List[str], str], window: int = 1,
+                               result_names: Union[List[str], str] = None, add_to_data: bool = True) -> pd.DataFrame:
+        if result_names is None:
+            result_names = [col + "_ReturnsVelocity_avg_" + str(window) for col in columns]
+
+        src_columns = _get_columns(columns)
+
+        target_name = [x + "_ReturnsVelocity_temp" for x in src_columns]
+        rv = self.returns_velocity(columns=src_columns, window=window, result_names=target_name, add_to_data=False)
+
+        rv_avg = self.exponential_weighted_functions(rv, target_name, functions=["mean"], alpha=1.0 / window,
+                                                     result_names={'mean': result_names}, add_to_data=False)
+
+        if add_to_data:
+            self.data[result_names] = rv_avg
+            return self.data
+        else:
+            return rv_avg
+
     def average_directional_index(self, close_name: str = "close", high_name: str = "high",
                                   low_name: str = "low", window: int = 14, result_name: str = None,
                                   is_parallel: bool = False, add_to_data: bool = True) -> pd.DataFrame:
@@ -407,7 +665,8 @@ class Indicators:
                                                                    alpha=1.0 / window, add_to_data=False)
 
         # DI+ and DI-
-        atr = self.average_true_range(close_name, high_name, low_name, window, "ATR", False)
+        atr = self.average_true_range(close_name, high_name, low_name, window, "ATR",
+                                      is_parallel=is_parallel, add_to_data=False)
 
         d1 = numpy_mul(is_parallel, numpy_div(is_parallel, smoothed_dm_positive["SDMp"].values, atr["ATR"].values), 100)
         directional_index_positive = pd.DataFrame(d1, columns=["DIp_" + str(window)], index=atr.index)
