@@ -109,3 +109,20 @@ def numpy_abs(is_parallel: bool, df: np.ndarray) -> np.ndarray:
     else:
         return noparallel_numpy_abs(df)
 
+
+@njit(parallel=True)
+def parallel_numpy_exp(df: np.ndarray) -> np.ndarray:
+    return np.exp(df)
+
+
+@njit
+def noparallel_numpy_exp(df: np.ndarray) -> np.ndarray:
+    return np.exp(df)
+
+
+def numpy_exp(is_parallel: bool, df: np.ndarray) -> np.ndarray:
+    if is_parallel:
+        return parallel_numpy_exp(df)
+    else:
+        return noparallel_numpy_exp(df)
+
