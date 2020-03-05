@@ -581,7 +581,7 @@ class Indicators:
             return pv_avg
 
     def returns_velocity(self, columns: Union[List[str], str], window: int = 1,
-                       result_names: Union[List[str], str] = None, add_to_data: bool = True) -> pd.DataFrame:
+                         result_names: Union[List[str], str] = None, add_to_data: bool = True) -> pd.DataFrame:
         if result_names is None:
             result_names = [col + "_ReturnsVelocity_" + str(window) for col in columns]
 
@@ -611,7 +611,7 @@ class Indicators:
             return df
 
     def returns_velocity_average(self, columns: Union[List[str], str], window: int = 1,
-                               result_names: Union[List[str], str] = None, add_to_data: bool = True) -> pd.DataFrame:
+                                 result_names: Union[List[str], str] = None, add_to_data: bool = True) -> pd.DataFrame:
         if result_names is None:
             result_names = [col + "_ReturnsVelocity_avg_" + str(window) for col in columns]
 
@@ -628,6 +628,28 @@ class Indicators:
             return self.data
         else:
             return rv_avg
+
+    def rsi(self, high: str = 'high', low: str = 'low', window: int = 1, result_names: Union[List[str], str] = None,
+            add_to_data: bool = True) -> pd.DataFrame:
+
+        if result_names is None:
+            result_names = ["rsi_" + str(window)]
+
+        is_parallel = self.is_parallel_computing
+
+        result_names = _get_columns(result_names)
+        hl_avg = self.exponential_weighted_moving_average([high, low], span=window, result_names=[high, low],
+                                                          dd_to_data=False)
+
+        df_rsi = numpy_div(is_parallel, hl_avg[high].values, hl_avg[low].values)
+        df_rsi = 100 - (100 / numpy_add(is_parallel, df_rsi, 1))
+        df_rsi = pd.DataFrame(df_rsi, columns=result_names, index=hl_avg.index)
+
+        if add_to_data:
+            self.data[result_names] = df_rsi
+            return self.data
+        else:
+            return df_rsi
 
     def average_directional_index(self, close_name: str = "close", high_name: str = "high",
                                   low_name: str = "low", window: int = 14, result_name: str = None,

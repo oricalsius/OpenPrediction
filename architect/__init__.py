@@ -7,6 +7,7 @@ from sklearn.metrics import r2_score
 from joblib import dump, load
 from strategies.indicators import Indicators
 from typing import Any, Callable, Tuple, Union, List
+from strategies.indicators.optim import *
 import numpy as np
 import pandas as pd
 import os
@@ -23,9 +24,11 @@ class MLArchitect:
                  normalize_x_callable: Any = "default_normalizer", save_normalize_x_model: str = None,
                  normalize_y_callable: Any = "default_normalizer", save_normalize_y_model: str = None,
                  window_prediction: int = 4, test_size: float = 0.1, random_state: int = 0, add_pca: bool = False,
-                 pca_n_components: float = 0.95, ml_model: Any = None, save_ml_path: str = None):
+                 pca_n_components: float = 0.95, ml_model: Any = None, save_ml_path: str = None,
+                 is_parallel: bool = False):
 
         # Variable initializing
+        self._is_parallel_computing = is_parallel
         default_src_columns = ["open", "close", "high", "low"]
         columns_to_clean = ["open", "close", "high", "low", "count", "vol", "amount"]
         self._window_prediction = window_prediction
@@ -358,6 +361,9 @@ class MLArchitect:
         ind_obj.returns_velocity_average(columns=src_columns, window=14,
                                          result_names=[x + "_ReturnsVelo_avg_14" for x in src_columns])
 
+        # RSI
+        ind_obj.rsi(high='high', low='low', window=14, result_names=["RSI_14"])
+
         # Exponential Moving average
         ind_obj.exponential_weighted_moving_average(columns=src_columns, span=14, ml_format=True,
                                                     result_names=["ex_" + x + "_avg_14" for x in src_columns])
@@ -498,6 +504,9 @@ class MLArchitect:
                                  result_names=[x + "_ReturnsVelo_5" for x in src_columns])
         ind_obj.returns_velocity_average(columns=src_columns, window=14,
                                          result_names=[x + "_ReturnsVelo_avg_14" for x in src_columns])
+
+        # RSI
+        ind_obj.rsi(high='high', low='low', window=14, result_names=["RSI_14"])
 
         # Raise Velocity = (high-low)/amount
         data["high_low_raise_velocity"] = pd.DataFrame((data["high"].values - data["low"].values)
@@ -749,7 +758,7 @@ class MLArchitect:
 
     @staticmethod
     def _restore_unique_window(y_predicted: pd.DataFrame, flat_data: pd.DataFrame, target_columns_names: List = [],
-                               window: int = 1, is_returns: bool = True):
+                               window: int = 1, is_returns: bool = True, is_parallel: bool = False):
         """
         Restore flat values for y.
 
@@ -774,7 +783,9 @@ class MLArchitect:
         predicted = pd.concat([y_predicted, df], axis=0)
 
         if is_returns:
-            df = pd.DataFrame(flat_data.loc[predicted.index, :] * np.exp(predicted.values))
+            exp_values = numpy_exp(is_parallel, predicted.values)
+            nu_df = numpy_mul(is_parallel, flat_data.reindex(index=predicted.index).values, exp_values)
+            df = pd.DataFrame(nu_df, columns=flat_data.columns, index=predicted.index)
         else:
             df = predicted
 
