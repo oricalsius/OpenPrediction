@@ -73,6 +73,12 @@ class MultiLayerPerceptronNN:
     def fit(self, train_x: object, train_y: object):
         self._model = self._model.fit(train_x, train_y)
 
+    def get_params(self, deep=True):
+        return self._model.get_params(deep)
+
+    def set_params(self, **params):
+        return self._model.set_params(**params)
+
     def predict(self, x, columns_for_dataframe: List = [], index_for_dataframe: object = None, sort_index: bool = False):
         y = self._model.predict(x)
 
