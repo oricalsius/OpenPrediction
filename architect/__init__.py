@@ -4,9 +4,10 @@ This package includes the main high level class to use.
 
 from learning.transforms import Normalization
 from sklearn.metrics import r2_score
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, cross_validate
 from joblib import dump, load
 from strategies.indicators import Indicators
-from typing import Any, Callable, Tuple, Union, List
+from typing import Any, Callable, Tuple, Union, List, Dict, Optional, Generator, Iterable
 from strategies.indicators.optim import *
 import numpy as np
 import pandas as pd
@@ -24,8 +25,8 @@ class MLArchitect:
                  normalize_x_callable: Any = "default_normalizer", save_normalize_x_model: str = None,
                  normalize_y_callable: Any = "default_normalizer", save_normalize_y_model: str = None,
                  window_prediction: int = 4, test_size: float = 0.1, random_state: int = 0, add_pca: bool = False,
-                 pca_n_components: float = 0.95, ml_model: Any = None, save_ml_path: str = None,
-                 is_parallel: bool = False):
+                 is_kernel_pca: bool = False, pca_n_components: Union[float, None] = 0.95, ml_model: Any = None,
+                 save_ml_path: str = None, is_parallel: bool = False):
 
         # Variable initializing
         self._is_parallel_computing = is_parallel
@@ -71,6 +72,7 @@ class MLArchitect:
         # Normalize train and test x
         self._x_norm_model = None
         self._add_pca = add_pca
+        self._is_kernel_pca = is_kernel_pca
         self._pca_n_components = pca_n_components
         self.norm_input_fit(normalize_x_callable, save_normalize_x_model)
 
@@ -95,6 +97,46 @@ class MLArchitect:
             else:
                 self._ml_model = ml_model
 
+    def gridsearchcv(self, param_grid: Union[Dict, List[Dict]], x: object = None, y: object = None,
+                     scoring: Union[str, Callable, List, Tuple, Dict, None] = None, n_jobs: Optional[int] = None,
+                     cv: Union[int, Generator, Iterable, None] = None, verbose: int = 0, **kwargs):
+        """
+        Exhaustive search over specified parameter values for an estimator.
+        https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GridSearchCV.html#sklearn.model_selection.GridSearchCV
+        """
+
+        if not self._ml_model:
+            raise Exception("Machine learning model not found. You should call ml_init_model.")
+
+        GridS = GridSearchCV(self.ml_model, param_grid=param_grid, scoring=scoring, n_jobs=n_jobs, cv=cv,
+                             verbose=verbose, **kwargs)
+
+        x_train, y_train = self.get_normalized_data(x, y, is_train=True)
+        GridS.fit(x_train, y_train)
+
+        return GridS
+
+    def cross_validate(self, x, y=None, scoring: Union[str, Callable, List, Tuple, Dict, None] = None,
+                       cv: Union[int, Generator, Iterable, None] = None, n_jobs: Optional[int] = None,
+                       verbose: int = 0, **kwargs):
+        """
+        Evaluate metric(s) by cross-validation and also record fit/score times.
+
+        https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.cross_validate.html
+        """
+
+        if not self._ml_model:
+            raise Exception("Machine learning model not found. You should call ml_init_model.")
+
+        x_train, y_train = self.get_normalized_data(x, y, is_train=True)
+
+        cvl = cross_validate(self.ml_model, X=x_train, y=y_train, cv=cv, scoring=scoring, n_jobs=n_jobs,
+                             verbose=verbose, **kwargs)
+        return cvl
+
+    def fit(self, x: object = None, y: object = None):
+        self.ml_fit(x, y)
+
     def ml_fit(self, x: object = None, y: object = None):
         if not self._ml_model:
             raise Exception("Machine learning model not found. You should call ml_init_model.")
@@ -102,16 +144,7 @@ class MLArchitect:
         if not callable(getattr(self._ml_model, "fit", None)):
             raise Exception("No fit method found for this machine learning model.")
 
-        x_train = x
-        if x is None or len(x) == 0:
-            x_train = self.x_train
-            x_train = self.norm_input_transform(x_train)
-
-        y_train = y
-        if y is None or len(y) == 0:
-            y_train = self.y_train
-            y_train = self.norm_output_transform(y_train)
-
+        x_train, y_train = self.get_normalized_data(x, y, is_train=True)
         self._ml_model.fit(x_train, y_train)
 
         # Save models
@@ -119,7 +152,7 @@ class MLArchitect:
             self.ml_save_model(model_path=self.ml_path)
 
     def ml_predict(self, x: object = None, columns_for_dataframe: List = None, index_for_dataframe: object = None,
-                   sort_index: bool = False, restore_y: bool = False, **kwargs_restoration):
+                   sort_index: bool = True, restore_y: bool = False, **kwargs_restoration):
         if not self._ml_model:
             raise Exception("Machine learning model not found. You should call ml_init_model.")
 
@@ -135,8 +168,11 @@ class MLArchitect:
         columns = list(self._y.columns) if not columns else columns
         index = list(x_to_predict.index) if not index else index
 
-        y_predicted = self._ml_model.predict(x_to_predict, columns, index, sort_index)
+        y_predicted = self._ml_model.predict(x_to_predict)
         y_predicted = self.norm_output_inverse_transform(y_predicted)
+
+        y_predicted = pd.DataFrame(y_predicted, columns=columns, index=index)
+        if sort_index: y_predicted.sort_index()
 
         if restore_y:
             if callable(self._y_restoration_routine):
@@ -441,10 +477,10 @@ class MLArchitect:
 
         # Quantile 0.05 and 0.95
         ind_obj.moving_quantile(columns=src_columns, quantile=0.01, window=14,
-                                result_names=[x + "_q_95" for x in src_columns])
+                                result_names=[x + "_q_1" for x in src_columns])
 
         ind_obj.moving_quantile(columns=src_columns, quantile=0.99, window=14,
-                                result_names=[x + "_q_95" for x in src_columns])
+                                result_names=[x + "_q_99" for x in src_columns])
 
         # Median
         ind_obj.moving_median(columns=src_columns, window=14, result_names=[x + "_median_14" for x in src_columns],
@@ -508,6 +544,10 @@ class MLArchitect:
         # RSI
         ind_obj.rsi(high='high', low='low', window=14, result_names=["RSI_14"])
 
+        # RELS
+        ind_obj.relative_slope(high='high', low='low', close='close', typical_window=5, rels_window=5,
+                               result_names=["RELS_5_5"])
+
         # Raise Velocity = (high-low)/amount
         data["high_low_raise_velocity"] = pd.DataFrame((data["high"].values - data["low"].values)
                                                        / data["amount"].values,
@@ -543,6 +583,7 @@ class MLArchitect:
                     self._x_norm_model = self._default_normalizer(self.x_train, add_standard_scaling=True,
                                                                   add_power_transform=True,
                                                                   min_max_range=(-1, 1), add_pca=self._add_pca,
+                                                                  is_kernel_pca=self._is_kernel_pca,
                                                                   pca_n_components=self._pca_n_components,
                                                                   save_normalize_x_model=save_normalize_x_model)
 
@@ -624,10 +665,34 @@ class MLArchitect:
 
         return self._y_norm_model.inverse_transform(data_to_inverse)
 
+    def get_normalized_data(self, x: object = None, y: object = None, is_train: bool = True) -> Tuple[object, object]:
+        """
+        Normalize x and y.
+
+        If x is None, train input data are normalized when is_train=True, otherwise, test input data are normalized.
+        If y is None, train output data are normalized when is_train=True, otherwise, test output data are normalized.
+        """
+
+        if x is None or len(x) == 0:
+            x_norm = self.x_train if is_train else self.x_test
+        else:
+            x_norm = x
+
+        if y is None or len(y) == 0:
+            y_norm = self.y_train if is_train else self.y_test
+        else:
+            y_norm = y
+
+        x_norm = self.norm_input_transform(x_norm)
+        y_norm = self.norm_output_transform(y_norm)
+
+        return x_norm, y_norm
+
     @staticmethod
     def _default_normalizer(data_to_fit: pd.DataFrame, min_max_range: Union[None, tuple] = None,
                             add_standard_scaling: bool = False, add_power_transform: bool = False,
-                            add_pca: bool = False, pca_n_components: float = None, save_normalize_x_model: str = None):
+                            is_kernel_pca: bool = False, add_pca: bool = False, pca_n_components: float = None,
+                            save_normalize_x_model: str = None):
 
         norm_object = Normalization()
         if add_standard_scaling:
@@ -644,8 +709,10 @@ class MLArchitect:
 
         # Apply PCA reduction to data_to_fit
         if add_pca:
-            #norm_object.add_pca_reduction(pca_n_components, svd_solver="full")
-            norm_object.add_kernel_pca_reduction(pca_n_components, kernel='linear', n_jobs=-1)
+            if is_kernel_pca:
+                norm_object.add_kernel_pca_reduction(pca_n_components, kernel='linear', n_jobs=-1)
+            else:
+                norm_object.add_pca_reduction(pca_n_components, svd_solver="full")
 
         norm_object.fit(data_to_fit)
 
