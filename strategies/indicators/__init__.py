@@ -651,6 +651,36 @@ class Indicators:
         else:
             return df_rsi
 
+    def relative_slope(self, high: str = 'high', low: str = 'low', close: str = 'close', typical_window: int = 1,
+                       rels_window: int = 1, result_names: Union[List[str], str] = None,
+                       add_to_data: bool = True) -> pd.DataFrame:
+
+        if result_names is None:
+            result_names = ["RELS_" + str(typical_window) + "_" + str(rels_window)]
+
+        result_names = _get_columns(result_names)
+
+        # Typical price
+        typical_price = pd.DataFrame((self.data[high].values + self.data[low].values + self.data[close].values)/3,
+                                     columns=['typical_price'], index=self.data.index)
+
+        mv_ty_price = self.exponential_weighted_functions(typical_price, ['typical_price'], functions=["mean"],
+                                                          alpha=1.0 / typical_window,
+                                                          result_names={'mean': ['typical_price']}, add_to_data=False)
+        mv_ty_price_1 = mv_ty_price.shift(1)
+
+        df = 2*(mv_ty_price-mv_ty_price_1)/(mv_ty_price+mv_ty_price_1)
+        rels = self.exponential_weighted_functions(df, ['typical_price'], functions=["mean"],
+                                                   alpha=1.0 / rels_window, result_names={'mean': result_names},
+                                                   add_to_data=False)
+        rels = rels.mul(100)
+
+        if add_to_data:
+            self.data[result_names] = rels
+            return self.data
+        else:
+            return rels
+
     def average_directional_index(self, close_name: str = "close", high_name: str = "high",
                                   low_name: str = "low", window: int = 14, result_name: str = None,
                                   is_parallel: bool = False, add_to_data: bool = True) -> pd.DataFrame:
