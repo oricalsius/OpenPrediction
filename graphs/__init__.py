@@ -30,14 +30,16 @@ def display_graph(data_to_display: DataFrame, open: str = 'open', close: str = '
     fig = make_subplots(rows=len(sub_plots) + 4, cols=1, shared_xaxes=True, vertical_spacing=0.01, specs=specs)
 
     # Add Candlestick graph
-    data_candle = data_to_display.loc[data_index_green, :]
-    fig.add_trace(go.Candlestick(x=data_index_green, open=data_candle[open], high=data_candle[high],
-                                 low=data_candle[low], close=data_candle[close]), row=1, col=1)
+    if data_index_green is not None and not data_index_green.empty:
+        data_candle = data_to_display.loc[data_index_green, :]
+        fig.add_trace(go.Candlestick(x=data_index_green, open=data_candle[open], high=data_candle[high],
+                                     low=data_candle[low], close=data_candle[close]), row=1, col=1)
 
-    data_cyan = data_to_display.loc[data_index_cyan, :]
-    fig.add_trace(go.Candlestick(x=data_index_cyan, open=data_cyan[open], high=data_cyan[high], low=data_cyan[low],
-                                 close=data_cyan[close], increasing_line_color='cyan',
-                                 decreasing_line_color='gray'), row=1, col=1)
+    if data_index_cyan is not None and not data_index_cyan.empty:
+        data_cyan = data_to_display.loc[data_index_cyan, :]
+        fig.add_trace(go.Candlestick(x=data_index_cyan, open=data_cyan[open], high=data_cyan[high], low=data_cyan[low],
+                                     close=data_cyan[close], increasing_line_color='cyan',
+                                     decreasing_line_color='gray'), row=1, col=1)
 
     # Add other scatters plots in the main graph
     for label, column_name in scatters_plot.items():
