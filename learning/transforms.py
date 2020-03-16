@@ -18,7 +18,7 @@ class Normalization:
         """
 
         self._normalization_steps = []
-        self._pca = None
+        self._pca = []
 
         if model_to_load != '':
             model = load(model_to_load)
@@ -44,7 +44,7 @@ class Normalization:
         return self._normalization_steps
 
     @property
-    def get_pca_model(self):
+    def get_pca_models(self):
         return self._pca
 
     def save_model(self, model_path: str):
@@ -125,8 +125,7 @@ class Normalization:
                 df.index = data.index
                 transformed_data = df
 
-        if self._pca:
-            self.pca_reduction_fit(transformed_data)
+        self.pca_reduction_fit(transformed_data)
 
     def transform(self, data: object):
         """
@@ -142,20 +141,15 @@ class Normalization:
 
         for scale, columns_to_scale in self._normalization_steps:
             if columns_to_scale:
-                df = pd.DataFrame(scale.transform(transformed_data[columns_to_scale]), columns=columns_to_scale)
-                df.index = transformed_data.index
+                df = pd.DataFrame(scale.transform(transformed_data[columns_to_scale]), columns=columns_to_scale,
+                                  index=transformed_data.index)
                 transformed_data[columns_to_scale] = df
 
             else:
-                df = pd.DataFrame(scale.transform(transformed_data), columns=data.columns)
-                df.index = data.index
+                df = pd.DataFrame(scale.transform(transformed_data), columns=data.columns, index=data.index)
                 transformed_data = df
 
-        if self._pca:
-            transformed_data = pd.DataFrame(self.pca_reduction_transform(transformed_data))
-            transformed_data.index = data.index
-
-        return transformed_data
+        return self.pca_reduction_transform(transformed_data)
 
     def inverse_transform(self, transformed_data: object):
         """
@@ -167,52 +161,69 @@ class Normalization:
         :return:
         """
 
-        inversed_data = transformed_data.copy()
-
-        if self._pca:
-            inversed_data = pd.DataFrame(self.pca_reduction_inverse_transform(inversed_data))
-            inversed_data.index = transformed_data.index
+        inversed_data = self.pca_reduction_inverse_transform(transformed_data.copy())
 
         for scale, columns_to_scale in reversed(self._normalization_steps):
             if columns_to_scale:
-                df = pd.DataFrame(scale.inverse_transform(inversed_data[columns_to_scale]), columns=columns_to_scale)
-                df.index = inversed_data.index
+                df = pd.DataFrame(scale.inverse_transform(inversed_data[columns_to_scale]), columns=columns_to_scale,
+                                  index=inversed_data.index)
                 inversed_data[columns_to_scale] = df
 
             else:
-                df = pd.DataFrame(scale.inverse_transform(inversed_data), columns=transformed_data.columns)
-                df.index = transformed_data.index
+                df = pd.DataFrame(scale.inverse_transform(inversed_data), columns=transformed_data.columns,
+                                  index=transformed_data.index)
                 inversed_data = df
 
         return inversed_data
 
     def add_pca_reduction(self, n_components: int = None, **kwargs):
         # n_components can also be 'mle' or a number in [0,1]
-        self._pca = decomposition.PCA(n_components=n_components, **kwargs)
-
-    def pca_reduction_fit(self, data: object):
-        # n_components can also be 'mle' or a number in [0,1]
-        self._pca = self._pca.fit(data)
-
-    def pca_reduction_transform(self, data: object):
-        return self._pca.transform(data)
-
-    def pca_reduction_fit_transform(self, data: object):
-        self.pca_reduction_fit(data)
-        return self.pca_reduction_transform(data)
-
-    def pca_reduction_inverse_transform(self, data: object):
-        if self._pca:
-            return self._pca.inverse_transform(data)
-        else:
-            return None
+        self._pca.append(decomposition.PCA(n_components=n_components, **kwargs))
 
     def add_kernel_pca_reduction(self, n_components: int = None,
                                  kernel: str = Union['linear', 'poly', 'rbf', 'sigmoid', 'cosine', 'precomputed'],
                                  gamma: float = None, degree: int = 3, coef0: float = 1, n_jobs: int = -1,
                                  remove_zero_eig: bool = False, fit_inverse_transform: bool = False, **kwargs):
         # n_components can also be 'mle' or a number in [0,1]
-        self._pca = decomposition.KernelPCA(n_components=n_components, kernel=kernel, gamma=gamma, degree=degree,
-                                            coef0=coef0, fit_inverse_transform=fit_inverse_transform, n_jobs=-1,
-                                            remove_zero_eig=remove_zero_eig, **kwargs)
+        self._pca.append(decomposition.KernelPCA(n_components=n_components, kernel=kernel, gamma=gamma, degree=degree,
+                                                 coef0=coef0, fit_inverse_transform=fit_inverse_transform, n_jobs=-1,
+                                                 remove_zero_eig=remove_zero_eig, **kwargs))
+
+    def pca_reduction_fit(self, data: object):
+        if self._pca:
+            transformed_data = data.copy()
+
+            for reduction in self._pca:
+                reduction.fit(transformed_data)
+                transformed_data = reduction.transform(transformed_data)
+
+    def pca_reduction_transform(self, data: object):
+        if self._pca:
+            transformed_data = data.copy()
+
+            for reduction in self._pca:
+                transformed_data = reduction.transform(transformed_data)
+
+            return pd.DataFrame(transformed_data, index=data.index)
+
+        else:
+            return data
+
+    def pca_reduction_fit_transform(self, data: object):
+        self.pca_reduction_fit(data)
+        return self.pca_reduction_transform(data)
+
+    def pca_reduction_inverse_transform(self, transformed_data: object):
+        if self._pca:
+            inversed_data = transformed_data.copy()
+
+            for reduction in self._pca:
+                inversed_data = reduction.inverse_transform(inversed_data)
+
+            return pd.DataFrame(inversed_data, index=transformed_data.index)
+        else:
+            return transformed_data
+
+
+
 
