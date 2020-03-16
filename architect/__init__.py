@@ -4,7 +4,8 @@ This package includes the main high level class to use.
 
 from learning.transforms import Normalization
 from sklearn.metrics import r2_score
-from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, cross_validate
+from sklearn.model_selection import GridSearchCV
+import sklearn.model_selection as sklmod
 from joblib import dump, load
 from strategies.indicators import Indicators
 from typing import Any, Callable, Tuple, Union, List, Dict, Optional, Generator, Iterable
@@ -24,12 +25,15 @@ class MLArchitect:
                  y_restoration_routine: Any = "default",
                  normalize_x_callable: Any = "default_normalizer", save_normalize_x_model: str = None,
                  normalize_y_callable: Any = "default_normalizer", save_normalize_y_model: str = None,
-                 window_prediction: int = 4, test_size: float = 0.1, random_state: int = 0, add_pca: bool = False,
-                 is_kernel_pca: bool = False, pca_n_components: Union[float, None] = 0.95, ml_model: Any = None,
-                 save_ml_path: str = None, is_parallel: bool = False):
+                 window_prediction: int = 4, test_size: float = 0.1, random_state: int = 0,
+                 pca_reductions: Union[List[Tuple], None] = [('linear', 0.95), ('kernel', None, 'linear')],
+                 ml_model: Any = None, save_ml_path: str = None, is_parallel: bool = False, disgard_last: bool = True,
+                 window_tuple: Tuple[int, int, int, int] = (22, 14, 5, 5)):
 
         # Variable initializing
         self._is_parallel_computing = is_parallel
+        self._disgard_last = disgard_last
+        self._window_tuple = window_tuple
         default_src_columns = ["open", "close", "high", "low"]
         columns_to_clean = ["open", "close", "high", "low", "count", "vol", "amount"]
         self._window_prediction = window_prediction
@@ -71,9 +75,7 @@ class MLArchitect:
 
         # Normalize train and test x
         self._x_norm_model = None
-        self._add_pca = add_pca
-        self._is_kernel_pca = is_kernel_pca
-        self._pca_n_components = pca_n_components
+        self._pca_reductions = pca_reductions
         self.norm_input_fit(normalize_x_callable, save_normalize_x_model)
 
         # Normalize train and test y
@@ -97,9 +99,11 @@ class MLArchitect:
             else:
                 self._ml_model = ml_model
 
-    def gridsearchcv(self, param_grid: Union[Dict, List[Dict]], x: object = None, y: object = None,
-                     scoring: Union[str, Callable, List, Tuple, Dict, None] = None, n_jobs: Optional[int] = None,
-                     cv: Union[int, Generator, Iterable, None] = None, verbose: int = 0, **kwargs):
+    def sklearn_gridsearchcv(self, param_grid: Union[Dict, List[Dict]], x=None, y=None,
+                             scoring: Union[str, Callable, List, Tuple, Dict, None] = None,
+                             n_jobs: Optional[int] = None, cv: Union[int, Generator, Iterable, None] = None,
+                             verbose: int = 0, n: Union[float, pd.Index] = None, start_ind=None,
+                             end_ind=None, **kwargs):
         """
         Exhaustive search over specified parameter values for an estimator.
         https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GridSearchCV.html#sklearn.model_selection.GridSearchCV
@@ -111,14 +115,23 @@ class MLArchitect:
         GridS = GridSearchCV(self.ml_model, param_grid=param_grid, scoring=scoring, n_jobs=n_jobs, cv=cv,
                              verbose=verbose, **kwargs)
 
-        x_train, y_train = self.get_normalized_data(x, y, is_train=True)
+        if x is None:
+            x_train = self.x_train_normalized(n, start_ind, end_ind)
+        else:
+            x_train = self._get_sub_elt(x, n, start_ind, end_ind)
+
+        if y is None:
+            y_train = self.y_train_normalized(n, start_ind, end_ind)
+        else:
+            y_train = self._get_sub_elt(y, n, start_ind, end_ind)
+
         GridS.fit(x_train, y_train)
 
         return GridS
 
     def cross_validate(self, x, y=None, scoring: Union[str, Callable, List, Tuple, Dict, None] = None,
                        cv: Union[int, Generator, Iterable, None] = None, n_jobs: Optional[int] = None,
-                       verbose: int = 0, **kwargs):
+                       verbose: int = 0, n: Union[float, pd.Index] = None, start_ind=None, end_ind=None, **kwargs):
         """
         Evaluate metric(s) by cross-validation and also record fit/score times.
 
@@ -128,23 +141,40 @@ class MLArchitect:
         if not self._ml_model:
             raise Exception("Machine learning model not found. You should call ml_init_model.")
 
-        x_train, y_train = self.get_normalized_data(x, y, is_train=True)
+        if x is None:
+            x_train = self.x_train_normalized(n, start_ind, end_ind)
+        else:
+            x_train = self._get_sub_elt(x, n, start_ind, end_ind)
 
-        cvl = cross_validate(self.ml_model, X=x_train, y=y_train, cv=cv, scoring=scoring, n_jobs=n_jobs,
-                             verbose=verbose, **kwargs)
+        if y is None:
+            y_train = self.y_train_normalized(n, start_ind, end_ind)
+        else:
+            y_train = self._get_sub_elt(y, n, start_ind, end_ind)
+
+        cvl = sklmod.cross_validate(self.ml_model, X=x_train, y=y_train, cv=cv, scoring=scoring, n_jobs=n_jobs,
+                                    verbose=verbose, **kwargs)
         return cvl
 
     def fit(self, x: object = None, y: object = None):
         self.ml_fit(x, y)
 
-    def ml_fit(self, x: object = None, y: object = None):
+    def ml_fit(self, x=None, y=None, n: Union[float, pd.Index] = None, start_ind=None, end_ind=None):
         if not self._ml_model:
             raise Exception("Machine learning model not found. You should call ml_init_model.")
 
         if not callable(getattr(self._ml_model, "fit", None)):
             raise Exception("No fit method found for this machine learning model.")
 
-        x_train, y_train = self.get_normalized_data(x, y, is_train=True)
+        if x is None:
+            x_train = self.x_train_normalized(n, start_ind, end_ind)
+        else:
+            x_train = self._get_sub_elt(x, n, start_ind, end_ind)
+
+        if y is None:
+            y_train = self.y_train_normalized(n, start_ind, end_ind)
+        else:
+            y_train = self._get_sub_elt(y, n, start_ind, end_ind)
+
         self._ml_model.fit(x_train, y_train)
 
         # Save models
@@ -168,7 +198,7 @@ class MLArchitect:
         columns = list(self._y.columns) if not columns else columns
         index = list(x_to_predict.index) if not index else index
 
-        y_predicted = self._ml_model.predict(x_to_predict)
+        y_predicted = pd.DataFrame(self._ml_model.predict(x_to_predict), columns=columns, index=index)
         y_predicted = self.norm_output_inverse_transform(y_predicted)
 
         y_predicted = pd.DataFrame(y_predicted, columns=columns, index=index)
@@ -259,6 +289,14 @@ class MLArchitect:
         return self._data_with_indicators
 
     @property
+    def index_min(self):
+        return self._index_min
+
+    @property
+    def index_max(self):
+        return self._index_max
+
+    @property
     def x_train(self):
         return self._x.loc[self._x_train] if self._only_indices else self._x_train
 
@@ -297,7 +335,9 @@ class MLArchitect:
         if indicators_callable is not None:
             if isinstance(indicators_callable, str) and indicators_callable == "default_gen_learning_indicators":
                 if is_x_flat:
-                    _ = self.default_compute_learning_indicators(self._x, inplace=True)
+                    _ = self.default_compute_learning_indicators(self._x, inplace=True,
+                                                                 disgard_last=self._disgard_last,
+                                                                 window_tuple=self._window_tuple)
 
             elif callable(indicators_callable):
                 self._x = indicators_callable(self._x)
@@ -307,7 +347,9 @@ class MLArchitect:
 
     @staticmethod
     def default_compute_learning_indicators(original_data: pd.DataFrame, ascending_order: bool = True,
-                                            drop_duplicates: bool = True, inplace: bool = True):
+                                            drop_duplicates: bool = True, inplace: bool = True,
+                                            disgard_last: bool = True,
+                                            window_tuple: Tuple[int, int, int, int] = (22, 14, 5, 5)):
         """
         Function to generate defaults indicators and preprocess them.
 
@@ -315,6 +357,8 @@ class MLArchitect:
         :param bool ascending_order: Order data in ascending order.
         :param bool drop_duplicates: Drop duplicated lines with the same index.
         :param bool inplace: If True, do operation inplace and return None.
+        :param bool disgard_last: Discard the last elt.
+        :param bool window_tuple: window short, medium, long and return window.
         :return: None if inplace=True else data
         """
 
@@ -328,111 +372,126 @@ class MLArchitect:
         ind_obj.set_index(index_column_name=data.index.name, ascending_order=ascending_order,
                           drop_duplicates=drop_duplicates)
 
-        # Simple moving average, std
-        ind_obj.moving_std(columns=src_columns, window=14, result_names=[x + "_std_14" for x in src_columns],
-                           ml_format=True)
+        # Discard the last index
+        if disgard_last:
+            data.drop(data.index[-1], inplace=True)
+
+        win_s = window_tuple[0]
+        win_m = window_tuple[1]
+        win_l = window_tuple[2]
+        ret_window = window_tuple[3]
 
         # Quantile 0.05 and 0.95
-        ind_obj.moving_quantile(columns=src_columns, quantile=0.05, window=14, ml_format=True,
-                                result_names=[x + "_q_05" for x in src_columns])
+        ind_obj.moving_quantile(columns=src_columns, quantile=0.05, window=win_m, ml_format=True,
+                                result_names=[x + "_q_05_" + str(win_m) for x in src_columns])
 
-        ind_obj.moving_quantile(columns=src_columns, quantile=0.95, window=14, ml_format=True,
-                                result_names=[x + "_q_95" for x in src_columns])
+        ind_obj.moving_quantile(columns=src_columns, quantile=0.95, window=win_m, ml_format=True,
+                                result_names=[x + "_q_95_" + str(win_m) for x in src_columns])
 
         # Median
-        ind_obj.moving_median(columns=src_columns, window=14, result_names=[x + "_median_14" for x in src_columns],
-                              ml_format=True)
+        ind_obj.moving_median(columns=src_columns, window=win_l, ml_format=True,
+                              result_names=[x + "_median_" + str(win_l) for x in src_columns])
 
         # Sum
-        ind_obj.moving_sum(columns=src_columns, window=5, result_names=[x + "_sum_5" for x in src_columns],
-                           ml_format=True)
-        ind_obj.moving_sum(columns=src_columns, window=10, result_names=[x + "_sum_10" for x in src_columns])
-        ind_obj.moving_sum(columns=src_columns, window=10, result_names=[x + "_sum_15" for x in src_columns],
-                           ml_format=True)
+        ind_obj.moving_sum(columns=src_columns, window=win_l, ml_format=True,
+                           result_names=[x + "_sum_" + str(win_l) for x in src_columns])
 
         # Compute log divisions of Sum 10
-        columns = [x + "_sum_10" for x in src_columns]
+        columns = [x + "_sum_" + str(win_l) for x in src_columns]
         proc_object.log_returns(columns, [x + "_log_div" for x in columns], window=1, delete_columns=True)
 
         # Min, Max
-        ind_obj.moving_min(columns=src_columns, window=15, result_names=[x + "_min_15" for x in src_columns],
-                           ml_format=True)
-        ind_obj.moving_max(columns=src_columns, window=15, result_names=[x + "_max_15" for x in src_columns],
-                           ml_format=True)
+        ind_obj.moving_min(columns=src_columns, window=win_l, ml_format=True,
+                           result_names=[x + "_min_" + str(win_l) for x in src_columns])
+        ind_obj.moving_max(columns=src_columns, window=win_l, ml_format=True,
+                           result_names=[x + "_max_" + str(win_l) for x in src_columns])
 
         # Skew, Kurt
-        ind_obj.moving_skew(columns=src_columns, window=14, result_names=[x + "_skew_14" for x in src_columns])
-        ind_obj.moving_kurt(columns=src_columns, window=14, result_names=[x + "_kurt_14" for x in src_columns])
+        ind_obj.moving_skew(columns=src_columns, window=win_m,
+                            result_names=[x + "_skew_" + str(win_m) for x in src_columns])
+        ind_obj.moving_kurt(columns=src_columns, window=win_m,
+                            result_names=[x + "_kurt_" + str(win_m) for x in src_columns])
 
         # True Range and its average
         ind_obj.true_range(window=1, result_names="tr", ml_format=True)
-        ind_obj.average_true_range(result_names="tr_avg_14", window=14, ml_format=True)
+        ind_obj.average_true_range(result_names="tr_avg_" + str(win_m), window=win_m, ml_format=True)
 
         # Average Directional Index
-        ind_obj.average_directional_index(result_name="adx_14", window=14)
+        ind_obj.average_directional_index(result_name="adx_" + str(win_m), window=win_m)
 
         # Custom Returns Directional Index
-        ind_obj.returns_dix(columns=src_columns, result_names=[x + "_rdix_5" for x in src_columns], window=5)
-        ind_obj.returns_dix_average(columns=src_columns, result_names=[x + "_rdix_avg_14" for x in src_columns],
-                                    window=14)
+        ind_obj.returns_dix(columns=src_columns, result_names=[x + "_rdix_" + str(win_l) for x in src_columns],
+                            window=win_l)
+        ind_obj.returns_dix_average(columns=src_columns, window=win_l,
+                                    result_names=[x + "_rdix_avg_" + str(win_l) for x in src_columns])
 
-        ind_obj.returns_square_dix(columns=src_columns, result_names=[x + "_square_rdix_5" for x in src_columns],
-                                   window=5)
-        ind_obj.returns_square_dix_average(columns=src_columns, window=14,
-                                           result_names=[x + "_square_rdix_avg_14" for x in src_columns])
+        ind_obj.returns_square_dix(columns=src_columns, window=win_l,
+                                   result_names=[x + "_square_rdix_" + str(win_l) for x in src_columns])
+        ind_obj.returns_square_dix_average(columns=src_columns, window=win_l,
+                                           result_names=[x + "_square_rdix_avg_" + str(win_l) for x in src_columns])
 
-        ind_obj.returns_norm_dix(columns=src_columns, window=5,
-                                 result_names=[x + "_norm_rdix_5" for x in src_columns])
+        ind_obj.returns_norm_dix(columns=src_columns, window=win_l,
+                                 result_names=[x + "_norm_dix_" + str(win_l) for x in src_columns])
 
-        ind_obj.returns_norm_dix_average(columns=src_columns, window=14,
-                                         result_names=[x + "_norm_rdix_avg_14" for x in src_columns])
+        ind_obj.returns_norm_dix_average(columns=src_columns, window=win_l,
+                                         result_names=[x + "_norm_dix_avg_" + str(win_l) for x in src_columns])
 
-        ind_obj.price_velocity(columns=src_columns, window=5,
-                               result_names=[x + "_PriceVelo_5" for x in src_columns], ml_format=True)
-        ind_obj.price_velocity_average(columns=src_columns, window=14,
-                                       result_names=[x + "_PriceVelo_avg_14" for x in src_columns], ml_format=True)
+        ind_obj.price_velocity(columns=src_columns, window=win_l, ml_format=True,
+                               result_names=[x + "_PriceVelo_" + str(win_l) for x in src_columns])
+        ind_obj.price_velocity_average(columns=src_columns, window=win_l, ml_format=True,
+                                       result_names=[x + "_PriceVelo_avg_" + str(win_l) for x in src_columns])
 
-        ind_obj.returns_velocity(columns=src_columns, window=5,
-                                 result_names=[x + "_ReturnsVelo_5" for x in src_columns])
-        ind_obj.returns_velocity_average(columns=src_columns, window=14,
-                                         result_names=[x + "_ReturnsVelo_avg_14" for x in src_columns])
+        ind_obj.returns_velocity(columns=src_columns, window=win_l,
+                                 result_names=[x + "_ReturnsVelo_" + str(win_l) for x in src_columns])
+        ind_obj.returns_velocity_average(columns=src_columns, window=win_l,
+                                         result_names=[x + "_ReturnsVelo_avg_" + str(win_l) for x in src_columns])
 
         # RSI
-        ind_obj.rsi(high='high', low='low', window=14, result_names=["RSI_14"])
+        ind_obj.rsi(high='high', low='low', window=win_l, result_names=["RSI_5"])
+
+        # RELS
+        ind_obj.relative_slope(high='high', low='low', close='close', typical_window=win_l, rels_window=win_l,
+                               result_names=["RELS_" + str(win_l) + "_" + str(win_l)])
 
         # Exponential Moving average
-        ind_obj.exponential_weighted_moving_average(columns=src_columns, span=14, ml_format=True,
-                                                    result_names=["ex_" + x + "_avg_14" for x in src_columns])
+        ind_obj.exponential_weighted_moving_average(columns=src_columns, span=win_l, ml_format=True,
+                                                    result_names=["ex_" + x + "_avg_" + str(win_l) for x in src_columns])
 
-        ind_obj.exponential_weighted_moving_std(columns=src_columns, span=14,
-                                                result_names=["ex_" + x + "_std_14" for x in src_columns],
+        ind_obj.exponential_weighted_moving_average(columns=src_columns, span=win_m, ml_format=True,
+                                                    result_names=["ex_" + x + "_avg_" + str(win_m) for x in src_columns])
+
+        ind_obj.exponential_weighted_moving_average(columns=src_columns, span=win_s, ml_format=True,
+                                                    result_names=["ex_" + x + "_avg_" + str(win_s) for x in src_columns])
+
+        ind_obj.exponential_weighted_moving_std(columns=src_columns, span=win_l,
+                                                result_names=["ex_" + x + "_std_" + str(win_l) for x in src_columns],
                                                 ml_format=True)
 
         # Simple and Exponential Moving average Channel
-        target_columns_names = [x + "_machannel_14_3" for x in src_columns]
-        ind_obj.exponential_weighted_moving_average_channel(columns=src_columns, nb_of_deviations=3, span=14,
+        target_columns_names = [x + "_machannel_" + str(win_l) + "_3" for x in src_columns]
+        ind_obj.exponential_weighted_moving_average_channel(columns=src_columns, nb_of_deviations=3, span=win_l,
                                                             result_names=["ex_" + x for x in target_columns_names],
                                                             ml_format=True)
 
         # Hull moving average
-        ind_obj.hull_moving_average(columns=src_columns, result_names=[x + "_hull_14" for x in src_columns], window=14,
-                                    ml_format=True)
+        ind_obj.hull_moving_average(columns=src_columns, ml_format=True,
+                                    result_names=[x + "_hull_" + str(win_l) for x in src_columns], window=win_l)
 
-        # Compute log returns and normal returns for i+1 to i+14
-        for i in range(5):
+        # Compute log returns and normal returns for i+1 to i+10
+        for i in range(ret_window):
             proc_object.log_returns(src_columns, [x + "_log_returns_" + str(i + 1) for x in src_columns], window=i + 1)
 
         # Compute the Simple and Exponential average of returns
-        returns_columns = [x + "_log_returns_" + str(i + 1) for x in src_columns for i in range(5)]
-        target_columns_names = ["ex_" + x + "_avg_14" for x in returns_columns]
-        ind_obj.exponential_weighted_moving_average(returns_columns, span=14, result_names=target_columns_names)
+        returns_columns = [x + "_log_returns_" + str(i + 1) for x in src_columns for i in range(ret_window)]
+        target_columns_names = ["ex_" + x + "_avg_" + str(win_l) for x in returns_columns]
+        ind_obj.exponential_weighted_moving_average(returns_columns, span=win_l, result_names=target_columns_names)
 
         # Compute the Simple and Exponential std of returns
-        target_columns_names = ["ex_" + x + "_std_14" for x in returns_columns]
-        ind_obj.exponential_weighted_moving_std(returns_columns, span=14, result_names=target_columns_names)
+        target_columns_names = ["ex_" + x + "_std_" + str(win_l) for x in returns_columns]
+        ind_obj.exponential_weighted_moving_std(returns_columns, span=win_l, result_names=target_columns_names)
 
         # Columns for which we want to compute the square
-        returns_columns.extend(["ex_" + x + "_avg_14" for x in returns_columns])
+        returns_columns.extend(["ex_" + x + "_avg_" + str(win_l) for x in returns_columns])
         target_columns_names = [x + "_square" for x in returns_columns]
 
         # Compute square values
@@ -440,9 +499,10 @@ class MLArchitect:
                                                   columns=target_columns_names, index=data.index)
 
         # Raise Velocity = (high-low)/amount
-        data["high_low_raise_velocity"] = pd.DataFrame((data["high"].values - data["low"].values)
-                                                       / data["amount"].values,
-                                                       columns=["high_low_raise_velocity"], index=data.index)
+        if "amount" in set(data.index):
+            data["high_low_raise_velocity"] = pd.DataFrame((data["high"].values - data["low"].values)
+                                                           / data["amount"].values,
+                                                           columns=["high_low_raise_velocity"], index=data.index)
 
         if inplace:
             return None
@@ -549,9 +609,10 @@ class MLArchitect:
                                result_names=["RELS_5_5"])
 
         # Raise Velocity = (high-low)/amount
-        data["high_low_raise_velocity"] = pd.DataFrame((data["high"].values - data["low"].values)
-                                                       / data["amount"].values,
-                                                       columns=["high_low_raise_velocity"], index=data.index)
+        if "amount" in set(data.index):
+            data["high_low_raise_velocity"] = pd.DataFrame((data["high"].values - data["low"].values)
+                                                           / data["amount"].values,
+                                                           columns=["high_low_raise_velocity"], index=data.index)
 
         if inplace:
             return None
@@ -582,9 +643,8 @@ class MLArchitect:
                 if normalize_x_callable == "default_normalizer":
                     self._x_norm_model = self._default_normalizer(self.x_train, add_standard_scaling=True,
                                                                   add_power_transform=True,
-                                                                  min_max_range=(-1, 1), add_pca=self._add_pca,
-                                                                  is_kernel_pca=self._is_kernel_pca,
-                                                                  pca_n_components=self._pca_n_components,
+                                                                  min_max_range=(-1, 1),
+                                                                  pca_reductions=self._pca_reductions,
                                                                   save_normalize_x_model=save_normalize_x_model)
 
                 elif normalize_x_callable != '' and os.path.isfile(normalize_x_callable):
@@ -665,33 +725,132 @@ class MLArchitect:
 
         return self._y_norm_model.inverse_transform(data_to_inverse)
 
-    def get_normalized_data(self, x: object = None, y: object = None, is_train: bool = True) -> Tuple[object, object]:
+    @staticmethod
+    def _get_sub_elt(data=None, n: Union[float, pd.Index] = None, start_ind=None, end_ind=None):
+        """
+        Get sub elements of data.
+
+        Only n or (start_ind AND end_ind) should be defined.
+
+        :param data: original data.
+        :param n: Number of elements to extract.
+        :param start_ind: First index for sub elements.
+        :param end_ind: Last index for sub elements.
+        :return: sub elements of data.
+        """
+
+        res = None
+        if data is not None:
+            if n is not None:
+                if isinstance(n, float) or isinstance(n, int):
+                    length = n if n > 1.0 else int(n * data.shape[0])
+                    res = data.iloc[:length]
+                elif isinstance(n, pd.Index):
+                    res = data.loc[n]
+            elif start_ind is not None or end_ind is not None:
+                start_ind = data.index[0] if start_ind is None else start_ind
+                end_ind = data.index[-1] if end_ind is None else end_ind
+
+                res = data.loc[start_ind:end_ind]
+            else:
+                res = data
+
+        return res
+
+    def get_normalized_data(self, x=None, y=None, n: Union[float, pd.Index] = None,
+                            start_ind=None, end_ind=None) -> Tuple[object, object]:
         """
         Normalize x and y.
-
-        If x is None, train input data are normalized when is_train=True, otherwise, test input data are normalized.
-        If y is None, train output data are normalized when is_train=True, otherwise, test output data are normalized.
         """
 
-        if x is None or len(x) == 0:
-            x_norm = self.x_train if is_train else self.x_test
-        else:
-            x_norm = x
+        x_norm = None
+        if x is not None:
+            x_norm = self.norm_input_transform(self._get_sub_elt(x, n, start_ind, end_ind))
 
-        if y is None or len(y) == 0:
-            y_norm = self.y_train if is_train else self.y_test
-        else:
-            y_norm = y
-
-        x_norm = self.norm_input_transform(x_norm)
-        y_norm = self.norm_output_transform(y_norm)
+        y_norm = None
+        if y is not None:
+            y_norm = self.norm_output_transform(self._get_sub_elt(y, n, start_ind, end_ind))
 
         return x_norm, y_norm
+
+    def _x_normalized(self, is_train: bool = True, n: Union[float, pd.Index] = None, start_ind=None, end_ind=None):
+        """
+        Normalize x and return it.
+        :param is_train: If is train.
+        :param n: Fraction to get.
+        :param start_ind: First index for sub elements.
+        :param end_ind: Last index for sub elements.
+        :return: Normalized x_train
+        """
+
+        x = self.x_train if is_train else self.x_test
+        x_res, _ = self.get_normalized_data(x, None, n, start_ind, end_ind)
+
+        return x_res
+
+    def x_train_normalized(self, n: Union[float, pd.Index] = None, start_ind=None, end_ind=None):
+        """
+        Normalize x_train and return it.
+        :param n: Fraction to get.
+        :param start_ind: First index for sub elements.
+        :param end_ind: Last index for sub elements.
+        :return: Normalized x_train
+        """
+
+        return self._x_normalized(True, n, start_ind, end_ind)
+
+    def x_test_normalized(self, n: Union[float, pd.Index] = None, start_ind=None, end_ind=None):
+        """
+        Normalize x_test and return it.
+        :param n: Fraction to get.
+        :param start_ind: First index for sub elements.
+        :param end_ind: Last index for sub elements.
+        :return: Normalized x_test
+        """
+
+        return self._x_normalized(False, n, start_ind, end_ind)
+
+    def _y_normalized(self, is_train: bool = True, n: Union[float, pd.Index] = None, start_ind=None, end_ind=None):
+        """
+        Normalize y and return it.
+        :param is_train: If is train.
+        :param n: Fraction to get.
+        :param start_ind: First index for sub elements.
+        :param end_ind: Last index for sub elements.
+        :return: Normalized x_train
+        """
+
+        y = self.y_train if is_train else self.y_test
+        _, y_res = self.get_normalized_data(None, y, n, start_ind, end_ind)
+
+        return y_res
+
+    def y_train_normalized(self, n: Union[float, pd.Index] = None, start_ind=None, end_ind=None):
+        """
+        Normalize y_train and return it.
+        :param n: Fraction to get.
+        :param start_ind: First index for sub elements.
+        :param end_ind: Last index for sub elements.
+        :return: Normalized y_train
+        """
+
+        return self._y_normalized(True, n, start_ind, end_ind)
+
+    def y_test_normalized(self, n: Union[float, pd.Index] = None, start_ind=None, end_ind=None):
+        """
+        Normalize y_test and return it.
+        :param n: Fraction to get.
+        :param start_ind: First index for sub elements.
+        :param end_ind: Last index for sub elements.
+        :return: Normalized y_test
+        """
+
+        return self._y_normalized(False, n, start_ind, end_ind)
 
     @staticmethod
     def _default_normalizer(data_to_fit: pd.DataFrame, min_max_range: Union[None, tuple] = None,
                             add_standard_scaling: bool = False, add_power_transform: bool = False,
-                            is_kernel_pca: bool = False, add_pca: bool = False, pca_n_components: float = None,
+                            pca_reductions: Union[List[Tuple], None] = None,
                             save_normalize_x_model: str = None):
 
         norm_object = Normalization()
@@ -708,11 +867,15 @@ class MLArchitect:
             #norm_object.add_min_max_scaling(data_to_fit, min_max_range=min_max_range)
 
         # Apply PCA reduction to data_to_fit
-        if add_pca:
-            if is_kernel_pca:
-                norm_object.add_kernel_pca_reduction(pca_n_components, kernel='linear', n_jobs=-1)
-            else:
-                norm_object.add_pca_reduction(pca_n_components, svd_solver="full")
+        if pca_reductions:
+            for reduction in pca_reductions:
+                if reduction[0].lower().strip() == 'kernel':
+                    norm_object.add_kernel_pca_reduction(n_components=reduction[1], kernel=reduction[2], n_jobs=-1)
+                elif reduction[0].lower().strip() == 'linear':
+                    norm_object.add_pca_reduction(n_components=reduction[1], svd_solver="full")
+                else:
+                    raise Exception(f"{reduction} method is not available. Possible values are "
+                                    f"'kernel' and 'linear'.")
 
         norm_object.fit(data_to_fit)
 
