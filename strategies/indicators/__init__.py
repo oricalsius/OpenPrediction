@@ -279,8 +279,8 @@ class Indicators:
         return df
 
     def moving_kurt(self, columns: Union[List[str], str], window: int = 14, result_names: List[str] = None,
-                   add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
-                      *args, **kwargs) -> pd.DataFrame:
+                    add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                    *args, **kwargs) -> pd.DataFrame:
         if result_names is None:
             result_names = [col + "_SKurt_" + str(window) for col in columns]
 
@@ -311,7 +311,7 @@ class Indicators:
             elif isinstance(ml_format, bool):
                 if ml_format:
                     columns = ["open", "close", "high", "low", "vol", "amount"]
-                    columns = list(set(columns) - (set(columns) - set(self.data.columns)))
+                    columns = list(set(columns).intersection(set(self.data.columns)))
                     new_columns = [result_names + "_velocity_" + x for x in columns]
 
                     df = pd.DataFrame(numpy_log(is_parallel, numpy_div(is_parallel,
@@ -351,7 +351,7 @@ class Indicators:
             elif isinstance(ml_format, bool):
                 if ml_format:
                     columns = ["open", "close", "high", "low", "vol", "amount"]
-                    columns = list(set(columns) - (set(columns) - set(self.data.columns)))
+                    columns = list(set(columns).intersection(set(self.data.columns)))
                     new_columns = [result_names + "_velocity_" + x for x in columns]
 
                     df_atr = pd.DataFrame(numpy_log(is_parallel,
@@ -639,7 +639,7 @@ class Indicators:
 
         result_names = _get_columns(result_names)
         hl_avg = self.exponential_weighted_moving_average([high, low], span=window, result_names=[high, low],
-                                                          dd_to_data=False)
+                                                          add_to_data=False)
 
         df_rsi = numpy_div(is_parallel, hl_avg[high].values, hl_avg[low].values)
         df_rsi = 100 - (100 / numpy_add(is_parallel, df_rsi, 1))
