@@ -66,10 +66,10 @@ class ProcessingIndicators:
             raise Exception("Parameters columns and result_names should have the same length.")
 
         d1 = numpy_div(is_parallel, self.data[src_columns].values, self.data[src_columns].shift(periods=window).values)
-        df = pd.DataFrame(numpy_log(is_parallel, d1), columns=src_columns, index=self.data.index)
+        df = pd.DataFrame(numpy_log(is_parallel, d1), columns=target_columns_names, index=self.data.index)
 
         if add_to_data:
-            self.data[result_names] = df
+            self.data[target_columns_names] = df
 
             if delete_columns:
                 self.data.drop(columns=src_columns, inplace=True)

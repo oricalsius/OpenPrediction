@@ -46,7 +46,7 @@ class Indicators:
 
     # region other functions
     @staticmethod
-    def nig_variates(a: float, b: float, loc: float = 0, scale: float = 1, size: int = 1,
+    def nig_variates(a: float, b: float, loc: float = 0, scale: float = 1, return_callable=False, size: int = 1,
                      random_state: int = None) -> np.ndarray:
         """
         A Normal Inverse Gaussian continuous random variable.
@@ -54,7 +54,10 @@ class Indicators:
         https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.norminvgauss.html
         """
 
-        return norminvgauss.rvs(a=a, b=b, loc=loc, scale=scale, size=size, random_state=random_state)
+        if return_callable:
+            return norminvgauss(a=a, b=b, loc=loc, scale=scale).rvs
+        else:
+            return norminvgauss.rvs(a=a, b=b, loc=loc, scale=scale, size=size, random_state=random_state)
 
     @staticmethod
     def nig_fit(data: List, floc: float = None, fscale: float = None) -> Tuple[float, float, float, float]:
@@ -74,14 +77,18 @@ class Indicators:
         return a, b, loc, scale
 
     @staticmethod
-    def normal_variates(mean: float = 0, std: float = 1, size: int = 1, random_state: int = None) -> np.ndarray:
+    def normal_variates(mean: float = 0, std: float = 1, return_callable=False, size: int = 1,
+                        random_state: int = None) -> np.ndarray:
         """
         A normal continuous random variable.
 
         https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.norm.html
         """
 
-        return norm.rvs(loc=mean, scale=std, size=size, random_state=random_state)
+        if return_callable:
+            return norm(loc=mean, scale=std).rvs
+        else:
+            return norm.rvs(loc=mean, scale=std, size=size, random_state=random_state)
 
     @staticmethod
     def normal_fit(data: List) -> Tuple[float, float]:
@@ -268,8 +275,8 @@ class Indicators:
         return df
 
     def moving_skew(self, columns: Union[List[str], str], window: int = 14, result_names: List[str] = None,
-                   add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
-                      *args, **kwargs) -> pd.DataFrame:
+                    add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                    *args, **kwargs) -> pd.DataFrame:
         if result_names is None:
             result_names = [col + "_SSkew_" + str(window) for col in columns]
 
@@ -387,7 +394,7 @@ class Indicators:
         rol = df.rolling(window=window)
         abs_rol = df.abs().rolling(window=window)
 
-        df = pd.DataFrame(numpy_div(is_parallel, rol.sum().values, abs_rol.sum().values + np.finfo(float).eps),
+        df = pd.DataFrame(numpy_div(is_parallel, rol.sum().values, abs_rol.sum().values, True),
                           columns=result_names, index=df.index)
 
         if add_to_data:
@@ -432,7 +439,7 @@ class Indicators:
         rol = df.rolling(window=window)
 
         df = pd.DataFrame(numpy_div(is_parallel, numpy_mul(is_parallel, rol.sum().values, rol.sum().values),
-                                    rol_2.sum().values+np.finfo(float).eps), columns=result_names, index=df.index)
+                                    rol_2.sum().values, True), columns=result_names, index=df.index)
 
         if add_to_data:
             self.data[result_names] = df
@@ -441,7 +448,8 @@ class Indicators:
             return df
 
     def returns_square_dix_average(self, columns: Union[List[str], str], window: int = 1,
-                                   result_names: Union[List[str], str] = None, add_to_data: bool = True) -> pd.DataFrame:
+                                   result_names: Union[List[str], str] = None,
+                                   add_to_data: bool = True) -> pd.DataFrame:
         if result_names is None:
             result_names = ["Square_RDIX_avg_" + str(window) + col for col in columns]
 
@@ -478,8 +486,7 @@ class Indicators:
         rol = pd.DataFrame(numpy_mul(is_parallel, dr_1.values, dr_1.values),
                            columns=src_columns, index=dr_1.index).rolling(window=window)
 
-        df = pd.DataFrame(numpy_div(is_parallel, dr_w.values,
-                                    np.sqrt(rol.sum().values)+np.finfo(float).eps),
+        df = pd.DataFrame(numpy_div(is_parallel, dr_w.values, np.sqrt(rol.sum().values), True),
                           columns=result_names, index=dr_w.index)
 
         if add_to_data:
@@ -629,21 +636,42 @@ class Indicators:
         else:
             return rv_avg
 
-    def rsi(self, high: str = 'high', low: str = 'low', window: int = 1, result_names: Union[List[str], str] = None,
+    def rsi(self, columns: Union[List[str], str], window: int = 1, result_names: Union[List[str], str] = None,
             add_to_data: bool = True) -> pd.DataFrame:
 
         if result_names is None:
-            result_names = ["rsi_" + str(window)]
+            result_names = [col + "_rsi_" + str(window) for col in columns]
 
+        src_columns, result_names = _get_columns(columns), _get_columns(result_names)
         is_parallel = self.is_parallel_computing
 
-        result_names = _get_columns(result_names)
-        hl_avg = self.exponential_weighted_moving_average([high, low], span=window, result_names=[high, low],
-                                                          add_to_data=False)
+        # Check length
+        if window > self.data.shape[0]:
+            raise Exception(f"Parameter window greater than the length of the DataFrame ({self.data.shape[0]}).")
 
-        df_rsi = numpy_div(is_parallel, hl_avg[high].values, hl_avg[low].values)
+        # Compute returns
+        diff = self.data[src_columns].diff(1).values
+
+        up_vec = diff.copy()
+        with np.errstate(invalid='ignore'):
+            up_vec[diff < 0] = 0
+        col_up = [x + "_UP" for x in src_columns]
+        df_up = pd.DataFrame(up_vec, columns=col_up, index=self.data.index)
+        avg_up = self.exponential_weighted_functions(df_up, col_up, functions=["mean"], span=window,
+                                                     result_names={'mean': col_up}, add_to_data=False)
+
+        down_vec = diff.copy()
+        with np.errstate(invalid='ignore'):
+            down_vec[diff > 0] = 0
+            down_vec = np.abs(down_vec)
+        col_down = [x + "_DOWN" for x in src_columns]
+        df_down = pd.DataFrame(down_vec, columns=col_down, index=self.data.index)
+        avg_down = self.exponential_weighted_functions(df_down, col_down, functions=["mean"], span=window,
+                                                       result_names={'mean': col_down}, add_to_data=False)
+
+        df_rsi = numpy_div(is_parallel, avg_up.values, avg_down.values, True)
         df_rsi = 100 - (100 / numpy_add(is_parallel, df_rsi, 1))
-        df_rsi = pd.DataFrame(df_rsi, columns=result_names, index=hl_avg.index)
+        df_rsi = pd.DataFrame(df_rsi, columns=result_names, index=self.data.index)
 
         if add_to_data:
             self.data[result_names] = df_rsi
@@ -748,18 +776,19 @@ class Indicators:
             return df
 
     def moving_average_channel(self, columns: Union[List[str], str], window: int = 1, nb_of_deviations: int = 3,
-                               result_names: List[str] = None, is_parallel: bool = False,
-                               add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
-                               *args, **kwargs) -> pd.DataFrame:
+                               result_names: List[str] = None, add_to_data: bool = True,
+                               ml_format: Union[Callable, bool] = None, *args, **kwargs) -> pd.DataFrame:
         if result_names is None:
-            result_names = ["MAChannel" + str(window) + "_" + str(nb_of_deviations) + "_" + col for col in columns]
+            result_names = ["MAChannel_" + str(window) + "_" + str(nb_of_deviations) + "_" + col for col in columns]
 
-        # Compute average and initialize the result
+        is_parallel = self.is_parallel_computing
+
+        src_columns, result_names = _get_columns(columns), _get_columns(result_names)
+
         average_names = [col + "_AVG" for col in result_names]
-        result_df = self.moving_average(columns=columns, window=window, result_names=average_names, add_to_data=False)
-
-        # Compute Std
         std_names = [col + "_STD" for col in result_names]
+
+        result_df = self.moving_average(columns=columns, window=window, result_names=average_names, add_to_data=False)
         std = self.moving_std(columns=columns, window=window, result_names=std_names, add_to_data=False)
 
         # Initialize UP and DOWN columns names
@@ -770,8 +799,8 @@ class Indicators:
                                     numpy_mul(is_parallel, std.values, nb_of_deviations)),
                           columns=upper_channel_names, index=result_df.index)
 
-        d2 = pd.DataFrame(numpy_sub(is_parallel, result_df.values,
-                                    numpy_mul(is_parallel, std.values, nb_of_deviations)),
+        d2 = pd.DataFrame(np.maximum(numpy_sub(is_parallel, result_df.values,
+                                     numpy_mul(is_parallel, std.values, nb_of_deviations)), 1),
                           columns=down_channel_names, index=result_df.index)
 
         result_df = pd.concat([result_df, d1, d2], axis=1)
@@ -800,6 +829,168 @@ class Indicators:
             return self.data
         else:
             return result_df
+
+    def commodity_channel_index(self, high: str = 'high', low: str = 'low', close: str = 'close',
+                                window: int = 1, result_name: str = None, add_to_data: bool = True,
+                                exponential_avg: bool = True) -> pd.DataFrame:
+        if result_name is None:
+            result_name = ["CCI_" + str(window)]
+
+        is_parallel = self.is_parallel_computing
+        result_name = _get_columns(result_name)
+
+        typical_price = (self.data[high].values + self.data[low].values + self.data[close].values)/3
+        typical_price = pd.DataFrame(typical_price, columns=['TP'], index=self.data.index)
+
+        if exponential_avg:
+            df = self.exponential_weighted_functions(typical_price, ['TP'], ["mean", "std"], add_to_data=False,
+                                                     result_names={"mean": ['TP_avg'], "std": ['TP_std']}, span=window)
+
+        else:
+            df = self.moving_window_functions(typical_price, ['TP'], ["mean", "std"], add_to_data=False,
+                                              result_names={"mean": ['TP_avg'], "std": ['TP_std']}, window=window)
+
+        res = pd.DataFrame((typical_price.values - df[['TP_avg']].values) / (0.015*df[['TP_std']].values),
+                           columns=result_name, index=self.data.index)
+
+        if add_to_data:
+            self.data[res.columns] = res
+            return self.data
+        else:
+            return res
+
+    def bollinger_bands(self, columns: Union[List[str], str], window: int = 1, nb_of_deviations: int = 2,
+                        result_names: Union[List[str], str] = None, add_to_data: bool = True,
+                        ml_format: Union[Callable, bool] = None,
+                        *args, **kwargs) -> pd.DataFrame:
+
+        if result_names is None:
+            result_names = ["bb_" + str(window) + "_" + str(nb_of_deviations) + "_" + col for col in columns]
+
+        df = self.moving_average_channel(columns, window, nb_of_deviations, result_names,
+                                         add_to_data, ml_format, *args, **kwargs)
+        return df
+
+    def bollinger_bands_percentage(self, columns: Union[List[str], str], window: int = 1, nb_of_deviations: int = 2,
+                                   result_names: Union[List[str], str] = None,
+                                   add_to_data: bool = True) -> pd.DataFrame:
+
+        if result_names is None:
+            result_names = ["bb_per_" + str(window) + "_" + str(nb_of_deviations) + "_" + col for col in columns]
+
+        src_columns, result_names = _get_columns(columns), _get_columns(result_names)
+
+        is_parallel = self.is_parallel_computing
+
+        df = self.bollinger_bands(columns, window, nb_of_deviations, result_names, add_to_data=False)
+
+        col_up = [x + "_UP" for x in result_names]
+        col_avg = [x + "_AVG" for x in result_names]
+        col_down = [x + "_DOWN" for x in result_names]
+
+        df = self._compute_bollinger_bands_percentage(df, self.data[src_columns], col_up, col_avg, col_down,
+                                                      is_parallel, result_names)
+
+        if add_to_data:
+            self.data[df.columns] = df
+            return self.data
+        else:
+            return df
+
+    def pivot_points_fibonacci(self, previous_high: str = 'high', previous_low: str = 'low', previous_close: str = None,
+                               previous_open: str = None, current_open: str = None, moving_window: int = 1,
+                               fibonacci_levels: list = None, result_name: str = None, add_to_data: bool = True,
+                               ml_format: Union[Callable, bool] = None, ref_columns: str = 'close',
+                               *args, **kwargs) -> pd.DataFrame:
+
+        if previous_close is None and previous_open is None and current_open is None:
+            raise Exception('Either previous_close or previous_open or current_open parameters should be non empty.')
+
+        if result_name is None:
+            result_name = "PP_" + str(moving_window)
+
+        if fibonacci_levels is None:
+            fibonacci_rates = [0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618, 2.618]#, 3.618, 4.236]
+        else:
+            fibonacci_rates = fibonacci_levels
+
+        is_parallel = self.is_parallel_computing
+
+        col_prev = [previous_high, previous_low]
+        div_count = len(col_prev)
+
+        pp_prev = self.data[col_prev].shift(1).rolling(window=moving_window)
+
+        # High and Low
+        high_prev, low_prev = pp_prev[[previous_high]].max(),  pp_prev[[previous_low]].min()
+        pp_prev = None
+
+        # PP
+        pp = high_prev.values + low_prev.values
+        diff = high_prev.values - low_prev.values
+        high_prev, low_prev = None, None
+
+        if previous_close is not None:
+            pp += self.data[[previous_close]].shift(1).values
+            div_count += 1
+
+        if previous_open is not None:
+            pp += self.data[[previous_open]].shift(moving_window).values
+            div_count += 1
+
+        if current_open is not None:
+            pp += self.data[[current_open]].values
+            div_count += 1
+
+        pp /= div_count
+
+        df = pd.DataFrame(pp, columns=[result_name], index=self.data.index)
+        for i, lvl in enumerate(fibonacci_rates):
+            df = pd.concat([df, pd.DataFrame(pp + lvl * diff,
+                                             columns=[result_name + '_R' + str(i+1)], index=self.data.index),
+                            pd.DataFrame(np.maximum(pp - lvl * diff, 1),
+                                         columns=[result_name + '_S' + str(i + 1)], index=self.data.index)], axis=1)
+
+        if ml_format is not None:
+            if callable(ml_format):
+                df = ml_format(df, *args, **kwargs)
+
+            elif isinstance(ml_format, bool):
+                if ml_format:
+                    d1 = numpy_div(is_parallel, df.values, self.data[[ref_columns]].values, True)
+                    df = pd.DataFrame(numpy_log(is_parallel, d1), columns=df.columns, index=df.index)
+
+            else:
+                raise Exception("ml_format parameter not recognized as a callable object neither as boolean")
+
+        if add_to_data:
+            self.data[df.columns] = df
+            return self.data
+        else:
+            return df
+
+    def date_info(self, halving_dates: List = None, add_to_data: bool = True) -> pd.DataFrame:
+        df_index = self.data.index
+
+        # day, dayofweek, month
+        df = pd.concat([pd.DataFrame(df_index.day.values.astype(np.int32), columns=['day'], index=df_index),
+                        pd.DataFrame(df_index.dayofweek.values.astype(np.int32), columns=['dayofweek'], index=df_index),
+                        pd.DataFrame(df_index.month.values.astype(np.int32), columns=['month'], index=df_index)],
+                       axis=1)
+
+        if halving_dates is not None:
+            dx = (np.array(halving_dates, dtype='datetime64[D]')
+                  - df_index.values.reshape((-1,1)).astype('datetime64[D]')).astype(np.float64)
+            dx[dx < 0] = np.inf
+
+            df = pd.concat([df, pd.DataFrame(dx.min(axis=1).astype(np.int64),
+                                             columns=['halving_delta'], index=df_index)], axis=1)
+
+        if add_to_data:
+            self.data[df.columns] = df
+            return self.data
+        else:
+            return df
 
     def _exponential_weighted_functions(self, columns: Union[List[str], str], functions: List[str] = ["mean"],
                                         span: Any = None, com: Any = None, halflife: Any = None, alpha: Any = None,
@@ -951,11 +1142,12 @@ class Indicators:
     def exponential_weighted_moving_average_channel(self, columns: Union[List[str], str], span: Any = None,
                                                     com: Any = None, halflife: Any = None, alpha: Any = None,
                                                     nb_of_deviations: int = 3, result_names: List[str] = None,
-                                                    is_parallel: bool = False, add_to_data: bool = True,
-                                                    ml_format: Union[Callable, bool] = None,
+                                                    add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
                                                     *args, **kwargs) -> pd.DataFrame:
         if result_names is None:
             result_names = ["EMAChannel" + "_" + str(nb_of_deviations) + "_" + col for col in columns]
+
+        is_parallel = self.is_parallel_computing
 
         # Compute average and initialize the result
         average_names = [col + "_AVG" for col in result_names]
@@ -975,8 +1167,8 @@ class Indicators:
                                     numpy_mul(is_parallel, std.values, nb_of_deviations)),
                           columns=upper_channel_names, index=result_df.index)
 
-        d2 = pd.DataFrame(numpy_sub(is_parallel, result_df.values,
-                                    numpy_mul(is_parallel, std.values, nb_of_deviations)),
+        d2 = pd.DataFrame(np.maximum(numpy_sub(is_parallel, result_df.values,
+                                     numpy_mul(is_parallel, std.values, nb_of_deviations)), 1),
                           columns=down_channel_names, index=result_df.index)
 
         result_df = pd.concat([result_df, d1, d2], axis=1)
@@ -1002,6 +1194,67 @@ class Indicators:
             return self.data
         else:
             return result_df
+
+    def exponential_weighted_bollinger_bands(self, columns: Union[List[str], str], span: Any = None,
+                                             com: Any = None, halflife: Any = None, alpha: Any = None,
+                                             nb_of_deviations: int = 2, result_names: Union[List[str], str] = None,
+                                             add_to_data: bool = True, ml_format: Union[Callable, bool] = None,
+                                             *args, **kwargs) -> pd.DataFrame:
+
+        if result_names is None:
+            result_names = [col + "_ex_bb_" + str(nb_of_deviations) for col in columns]
+
+        df = self.exponential_weighted_moving_average_channel(columns, span, com, halflife, alpha, nb_of_deviations,
+                                                              result_names, add_to_data, ml_format, *args, **kwargs)
+        return df
+
+    def exponential_weighted_bollinger_bands_percentage(self, columns: Union[List[str], str], span: Any = None,
+                                                        com: Any = None, halflife: Any = None, alpha: Any = None,
+                                                        nb_of_deviations: int = 2,
+                                                        result_names: Union[List[str], str] = None,
+                                                        add_to_data: bool = True) -> pd.DataFrame:
+
+        if result_names is None:
+            result_names = [col + "_bb_per_" + str(nb_of_deviations) for col in columns]
+
+        src_columns, result_names = _get_columns(columns), _get_columns(result_names)
+
+        is_parallel = self.is_parallel_computing
+
+        df = self.exponential_weighted_bollinger_bands(columns, span, com, halflife, alpha, nb_of_deviations,
+                                                       result_names, add_to_data=False)
+
+        col_up = [x + "_UP" for x in result_names]
+        col_avg = [x + "_AVG" for x in result_names]
+        col_down = [x + "_DOWN" for x in result_names]
+
+        df = self._compute_bollinger_bands_percentage(df, self.data[src_columns], col_up, col_avg, col_down,
+                                                      is_parallel, result_names)
+
+        if add_to_data:
+            self.data[df.columns] = df
+            return self.data
+        else:
+            return df
+
+    @staticmethod
+    def _compute_bollinger_bands_percentage(df, original_data, col_up: List[str] = None, col_avg: List[str] = None,
+                                            col_down: List[str] = None, is_parallel: bool = False,
+                                            result_names: Union[List[str], str] = None) -> pd.DataFrame:
+
+        per_diff = df[col_up].values - df[col_down].values
+
+        per_rng = numpy_div(is_parallel, per_diff, df[col_avg].values)
+        per_pr_down = numpy_div(is_parallel, original_data.values - df[col_down].values, per_diff)
+        per_pr_avg = numpy_div(is_parallel, original_data.values - df[col_avg].values, per_diff)
+        per_pr_up = numpy_div(is_parallel, df[col_up].values - original_data.values, per_diff)
+
+        per_rng = pd.DataFrame(per_rng, columns=[x + "_RNG" for x in result_names], index=original_data.index)
+        per_pr_down = pd.DataFrame(per_pr_down, columns=[x + "_DOWN" for x in result_names], index=original_data.index)
+        per_pr_avg = pd.DataFrame(per_pr_avg, columns=[x + "_AVG" for x in result_names], index=original_data.index)
+        per_pr_up = pd.DataFrame(per_pr_up, columns=[x + "_UP" for x in result_names], index=original_data.index)
+
+        return pd.concat([per_rng, per_pr_down, per_pr_avg, per_pr_up], axis=1)
 
     def hull_moving_average(self, columns: Union[List[str], str], window: int = 1, result_names: List[str] = None,
                             is_parallel: bool = False, add_to_data: bool = True,
@@ -1055,10 +1308,13 @@ class Indicators:
         :param bool ascending_order: Sort the DataFrame in ascending order.
         :param bool is_timestamp: Is the index column in form of timestamp.
         :param str unit: Used only when is_timestamp is true.
+        :param bool drop_duplicates: Whether to drop duplicates or not.
         """
 
         if self.data.index.name == index_column_name:
             self.data.reset_index(inplace=True)
+
+        index_column_name = 'index' if index_column_name is None else index_column_name
 
         if index_column_name not in set(self.data.columns):
             raise Exception(f"Column {index_column_name} is not in the DataFrame.")
