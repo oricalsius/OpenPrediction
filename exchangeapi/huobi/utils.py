@@ -1,17 +1,21 @@
 """Module to define decorators and validators"""
-from typing import List
+from typing import List, Any, Union
 from pandas import core, DataFrame
 from jsonpath_ng import parse
 import sys
 
 
-def parse_json_to_object(json: dict, schema: object = None, **kwargs_schema: dict):
+def parse_json_to_object(json: Union[dict, List], schema: Any = None, **kwargs_schema: dict):
     if schema is None:
         return json
     elif schema is core.frame.DataFrame:
         return DataFrame(json)
     else:
-        return schema.load(json, **kwargs_schema)
+        key = getattr(schema, "global_schema_key", None)
+        if key is not None and key.strip() != '':
+            return schema.load({key: json}, **kwargs_schema)
+        else:
+            return schema.load(json, **kwargs_schema)
 
 
 def get_json_key(json: dict, json_path: str = "data"):
