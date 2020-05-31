@@ -171,8 +171,10 @@ class Normalization:
                 inversed_data[columns_to_scale] = df
 
             else:
-                df = pd.DataFrame(scale.inverse_transform(inversed_data), columns=transformed_data.columns,
-                                  index=transformed_data.index)
+                columns = transformed_data.columns if hasattr(transformed_data, 'columns') else None
+                index = transformed_data.index if hasattr(transformed_data, 'index') else None
+
+                df = pd.DataFrame(scale.inverse_transform(inversed_data), columns=columns, index=index)
                 inversed_data = df
 
         return inversed_data

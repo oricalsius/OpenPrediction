@@ -7,5 +7,5 @@ setup(
               "exchangeapi.huobi.unittests", "strategies", "strategies.indicators"],
 
     install_requires=['requests', 'aiohttp', 'asyncio', 'pandas', 'numpy', 'marshmallow', 'sqlalchemy', 'plotly',
-                      'joblib', 'scikit-learn', 'scipy', 'numba', 'keras-tuner', 'tensorflow']
+                      'joblib', 'scikit-learn', 'scipy', 'numba', 'keras-tuner', 'tensorflow', 'keras', 'pymongo']
 )

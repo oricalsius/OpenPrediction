@@ -1,4 +1,4 @@
-from main_exec import load_original_data_huobi
+from utils import load_data
 from learning import MultiLayerPerceptronNN
 from architect import MLArchitect
 
@@ -21,7 +21,7 @@ if __name__ == "__main__":
                                       batch_size=75, n_iter_no_change=10)
 
     # Get the exchange data
-    exchange_data = load_original_data_huobi()
+    exchange_data = load_data()
 
     profile_path = r'.\profile'
 

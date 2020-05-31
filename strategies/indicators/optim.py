@@ -3,7 +3,7 @@ Module defining optimized function with numba.
 """
 
 from numba import jit, njit
-from numba.special import prange
+from numba.misc.special import prange
 from typing import Union
 
 import numpy as np

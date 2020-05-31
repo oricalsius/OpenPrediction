@@ -15,7 +15,7 @@ from keras.models import load_model, save_model, Sequential, Model
 from itertools import zip_longest
 
 import tensorflow as tf
-import tensorflow.keras.backend as K
+from keras import backend as K
 import keras
 #from tensorflow import keras
 import keras.layers as kl
@@ -199,9 +199,9 @@ class MLArchitect:
             prefit_simulation_data=None, prefit_sample_data=None, prefit_simulation_size=None,
             prefit_loops=1, **kwargs):
 
-        self.ml_fit(x, y, start_ind=start_ind, end_ind=end_ind, prefit_simulation_data=prefit_simulation_data,
-                    prefit_sample_data=prefit_sample_data, prefit_simulation_size=prefit_simulation_size,
-                    prefit_loops=prefit_loops, **kwargs)
+        return self.ml_fit(x, y, start_ind=start_ind, end_ind=end_ind, prefit_simulation_data=prefit_simulation_data,
+                           prefit_sample_data=prefit_sample_data, prefit_simulation_size=prefit_simulation_size,
+                           prefit_loops=prefit_loops, **kwargs)
 
     def ml_fit(self, x=None, y=None, n: Union[float, pd.Index] = None, start_ind=None, end_ind=None,
                prefit_simulation_data=None, prefit_sample_data=None, prefit_simulation_size=None,
@@ -228,11 +228,13 @@ class MLArchitect:
         else:
             y_train = self._get_sub_elt(y, n, start_ind, end_ind)
 
-        self._ml_model.fit(x_train, y_train, **kwargs)
+        fit = self._ml_model.fit(x_train, y_train, **kwargs)
 
         # Save models
         if self.ml_path is not None and self.ml_path != '':
             self.ml_save_model(model_path=self.ml_path)
+
+        return fit
 
     def _run_prefit_simulation(self, model, prefit_simulation_data=None, prefit_sample_data=None,
                                prefit_simulation_size=-1, prefit_loops=-1, kwargs_fit=None):
@@ -267,7 +269,7 @@ class MLArchitect:
 
         pca_reductions, i = model.input_shape[1], 1
         for fit_data in get_data():
-            arc = MLArchitect(x_data=fit_data, data_enhancement=True, columns_equivalences=columns_equivalences,
+            arc = MLArchitect(x_data=fit_data, columns_equivalences=columns_equivalences,
                               index_infer_datetime_format=True, pca_reductions=[('linear', pca_reductions)],
                               columns_to_predict=self._columns_to_predict, window_prediction=self._window_prediction,
                               columns_indicators=self._columns_indicators, test_size=0.10, ml_model=model,
@@ -397,6 +399,22 @@ class MLArchitect:
         return np.mean(np.abs(actual - predicted), dtype=np.float64)
 
     @staticmethod
+    def keras_r2_score(y_true, y_pred):
+        u = K.sum(K.square(y_true - y_pred))
+        v = K.sum(K.square(y_true - K.mean(y_true, axis=0)))
+        return 1 - u / (v + K.epsilon())
+
+    @staticmethod
+    def keras_mean_absolute_percentage_error(y_true, y_pred):
+        f_error = y_true - y_pred
+
+        return 100 * K.mean(K.abs(f_error / y_true))
+
+    @staticmethod
+    def swish(x, beta=1):
+        return x * keras.activations.sigmoid(beta * x)
+
+    @staticmethod
     def sklearn_build_model(hidden_layer_sizes=(350, 100), activation='logistic', random_state=0,
                             validation_fraction=0.2, max_iter=1000, batch_size=50):
         ml_model = neural_network.MLPRegressor(hidden_layer_sizes=hidden_layer_sizes, activation=activation,
@@ -409,44 +427,71 @@ class MLArchitect:
         return ml_model
 
     @staticmethod
-    def keras_build_model(os_seed, np_seed, backend_seed, n_input, n_output, n_init_neurons=100):
+    def keras_build_model(os_seed, np_seed, backend_seed, n_input, n_output, n_steps_in, n_steps_out,
+                          n_features, n_init_neurons=100):
         random.seed(os_seed)
         np.random.seed(np_seed)
         tf.random.set_seed(backend_seed)
+
+        keras.utils.generic_utils.get_custom_objects().update({'swish': kl.Activation(MLArchitect.swish)})
 
         #n = arc.x_train_normalized(2).shape
         #n_output = arc.y_train_normalized(2).shape[1]
 
         r_l1, r_l2 = 1e-3, 1e-3
-        drop, fact1 = 0.3, 1.1
+        drop, fact1 = 0.2, 1.1
 
         model = Sequential()
 
-        model.add(kl.Dense(n_init_neurons*3, input_dim=n_input, activity_regularizer=keras.regularizers.l2(r_l2)))
-        model.add(kl.PReLU())
+        # model.add(kl.TimeDistributed(kl.Conv1D(filters=n_init_neurons * 3, kernel_size=1, activation='relu'),
+        #                              input_shape=(None, n_steps_in, n_features)))
+        # model.add(kl.TimeDistributed(kl.MaxPooling1D(pool_size=2)))
+        # model.add(kl.TimeDistributed(kl.Flatten()))
+
+        model.add(kl.LSTM(n_init_neurons, activation='relu', input_shape=(n_steps_in, n_features),
+                          activity_regularizer=keras.regularizers.l2(r_l2), return_sequences=True))
+
+        model.add(kl.LSTM(n_init_neurons, activation='relu'))
+        model.add(kl.Dropout(rate=0.1))
+
+        model.add(kl.Dense(n_init_neurons*2, activity_regularizer=keras.regularizers.l2(r_l2)))
+        model.add(kl.Activation(MLArchitect.swish))
         model.add(kl.BatchNormalization())
         model.add(kl.Dropout(rate=drop, seed=backend_seed))
-
-        #model.add(kl.Dense(n_init_neurons * 2, activity_regularizer=keras.regularizers.l2(r_l2)))
-        model.add(kl.Dense(n_init_neurons * 3))
-        model.add(kl.Activation(keras.activations.softsign))
-        model.add(kl.BatchNormalization())
-        #model.add(kl.Dropout(rate=drop, seed=backend_seed))
-
-        model.add(kl.Dense(n_init_neurons * 2))
-        model.add(kl.Activation(keras.activations.softsign))
 
         model.add(kl.Dense(n_init_neurons))
         model.add(kl.Activation(keras.activations.softsign))
 
         model.add(kl.Dense(n_output))
-        model.add(kl.Activation(keras.activations.softsign))
+        #model.add(kl.Activation(keras.activations.softsign))
+        model.add(kl.Activation('linear'))
 
-        optim = keras.optimizers.Adadelta(clipnorm=1.0)
-        #optim = keras.optimizers.adam(learning_rate=1e-3, clipnorm=2.0)
+
+        # model.add(kl.Dense(n_init_neurons*3, input_dim=n_input, activity_regularizer=keras.regularizers.l2(r_l2)))
+        # model.add(kl.PReLU())
+        # model.add(kl.BatchNormalization())
+        # model.add(kl.Dropout(rate=drop, seed=backend_seed))
+        #
+        # #model.add(kl.Dense(n_init_neurons * 2, activity_regularizer=keras.regularizers.l2(r_l2)))
+        # model.add(kl.Activation(keras.activations.softsign))
+        # model.add(kl.BatchNormalization())
+        # #model.add(kl.Dropout(rate=drop, seed=backend_seed))
+        #
+        # # model.add(kl.Dense(n_init_neurons * 2))
+        # # model.add(kl.Activation(keras.activations.softsign))
+        # #
+        # # model.add(kl.Dense(n_init_neurons))
+        # # model.add(kl.Activation(keras.activations.softsign))
+        #
+        # model.add(kl.Dense(n_output))
+        # model.add(kl.Activation(keras.activations.softsign))
+
+        optim = keras.optimizers.Adadelta()
+        #optim = keras.optimizers.adam(learning_rate=1e-3, clipnorm=1.0)
         #optim = keras.optimizers.Nadam()
-        model.compile(optimizer=optim,
-                      loss='mean_squared_error', metrics=['accuracy'])
+        model.compile(optimizer=optim, loss='mse', #loss='mean_absolute_error',
+                      metrics=[MLArchitect.keras_r2_score,
+                               MLArchitect.keras_mean_absolute_percentage_error])
 
         return model
 
@@ -821,7 +866,7 @@ class MLArchitect:
 
         # Quantile 0.05 and 0.95
         ind_obj.moving_quantile(columns=src_columns, quantile=0.01, window=14,
-                                result_names=[x + "_q_1" for x in src_columns])
+                                result_names=[x + "_q_05" for x in src_columns])
 
         ind_obj.moving_quantile(columns=src_columns, quantile=0.99, window=14,
                                 result_names=[x + "_q_99" for x in src_columns])
@@ -977,7 +1022,7 @@ class MLArchitect:
                 raise Exception(f"'normalize_y_callable' not recognized as a callable object neither as a path for"
                                 f" a normalization model.")
 
-    def norm_input_transform(self, data_to_transform: pd.DataFrame) -> object:
+    def norm_input_transform(self, data_to_transform: pd.DataFrame) -> Any:
         if not self._x_norm_model:
             raise Exception("Normalization model for inputs not found. You should call norm_input_fit to define "
                             "a model and fit it.")
@@ -987,7 +1032,7 @@ class MLArchitect:
 
         return self._x_norm_model.transform(data_to_transform)
 
-    def norm_output_transform(self, data_to_transform: pd.DataFrame) -> object:
+    def norm_output_transform(self, data_to_transform: pd.DataFrame) -> Any:
         if not self._y_norm_model:
             raise Exception("Normalization model for outputs not found. You should call norm_output_fit "
                             "to define a model and fit it.")
@@ -997,7 +1042,7 @@ class MLArchitect:
 
         return self._y_norm_model.transform(data_to_transform)
 
-    def norm_input_inverse_transform(self, data_to_inverse: pd.DataFrame) -> object:
+    def norm_input_inverse_transform(self, data_to_inverse: pd.DataFrame) -> Any:
         if not self._x_norm_model:
             raise Exception("Normalization model for inputs not found. You should call norm_input_fit to define "
                             "a model and fit it.")
@@ -1007,7 +1052,7 @@ class MLArchitect:
 
         return self._x_norm_model.inverse_transform(data_to_inverse)
 
-    def norm_output_inverse_transform(self, data_to_inverse: pd.DataFrame) -> object:
+    def norm_output_inverse_transform(self, data_to_inverse: pd.DataFrame) -> Any:
         if not self._y_norm_model:
             raise Exception("Normalization model for outputs not found. You should call norm_output_fit "
                             "to define a model and fit it.")
@@ -1051,7 +1096,7 @@ class MLArchitect:
         return res
 
     def get_normalized_data(self, x=None, y=None, n: Union[float, pd.Index] = None,
-                            start_ind=None, end_ind=None) -> Tuple[object, object]:
+                            start_ind=None, end_ind=None) -> Tuple[Any, Any]:
         """
         Normalize x and y.
         """
@@ -1517,11 +1562,13 @@ class MLArchitect:
 
                         if column == 'high':
                             cond = df.loc[ind].values >= data.loc[ind, oc_col.values()].max(axis=1).values.reshape(-1,1)
+                            quantile = 0.1
                         else:
                             cond = df.loc[ind].values <= data.loc[ind, oc_col.values()].min(axis=1).values.reshape(-1,1)
+                            quantile = 0.9
 
                         # Compute the mean of highest values or the mean of lowest values
-                        data.loc[ind, column] = np.nanmean(np.where(cond, df.loc[ind], np.nan), axis=1)
+                        data.loc[ind, column] = np.nanquantile(np.where(cond, df.loc[ind], np.nan), quantile, axis=1)
                         res = pd.concat([res, data.loc[ind, [column]]], axis=0)
 
                         # Compute returns and save it instead of direct value
@@ -1583,8 +1630,7 @@ class MLArchitect:
         pd.options.mode.use_inf_as_na = True
 
         if columns_equivalences is None:
-            columns_equivalences = {'open': 'open', 'close': 'close', 'high': 'high', 'low': 'low', 'vol': 'vol',
-                                    'amount': 'amount'}
+            columns_equivalences = dict(zip(['close', 'open', 'high', 'low'], ['close', 'open', 'high', 'low']))
 
         price_col = dict()
         for x in ['close', 'open', 'high', 'low']:
@@ -1689,8 +1735,10 @@ class MLArchitect:
                 ind = pd.DatetimeIndex(miss, name='id').dropna()
                 data = pd.DataFrame()
                 for col in columns:
+                    p_ini = init if col not in set(res.columns) else res.loc[res.index[-1], col]
+
                     variates = info_dict[col]['variates'](size=(len(ind), 100)).mean(axis=1)
-                    df = pd.DataFrame(init * np.exp(np.cumsum(variates, axis=0)), columns=[col], index=ind)
+                    df = pd.DataFrame(p_ini * np.exp(np.cumsum(variates, axis=0)), columns=[col], index=ind)
                     data = pd.concat([data, df], axis=1)
 
                 res = pd.concat([res, data], axis=0)
@@ -1701,22 +1749,28 @@ class MLArchitect:
                 ind = pd.DatetimeIndex(miss, name='id').dropna()
                 data = pd.DataFrame()
                 for col in {high_name, low_name} & set(sample.columns):
+                    p_ini = init if col not in set(high_low.columns) else high_low.loc[high_low.index[-1], col]
+
                     variates = info_dict[high_name]['variates'](size=(len(ind), 100))
-                    df = pd.DataFrame(init * np.exp(np.cumsum(variates, axis=0)), columns=[col]*100, index=ind)
+                    df = pd.DataFrame(p_ini * np.exp(np.cumsum(variates, axis=0)), columns=[col]*100, index=ind)
 
                     if col == high_name:
                         cond = df.values >= res.loc[ind, columns].max(axis=1).values.reshape(-1, 1)
+                        quantile = 0.1
                     else:
                         cond = df.values <= res.loc[ind, columns].min(axis=1).values.reshape(-1, 1)
+                        quantile = 0.9
 
                     # Compute the mean of highest values or the mean of lowest values
-                    df = pd.DataFrame(np.nanmean(np.where(cond, df, np.nan), axis=1), columns=[col], index=ind)
+                    df = pd.DataFrame(np.nanquantile(np.where(cond, df, np.nan), quantile, axis=1),
+                                      columns=[col], index=ind)
                     data = pd.concat([data, df], axis=1)
 
                 high_low = pd.concat([high_low, data], axis=0)
 
             res = pd.concat([res, high_low], axis=1)
             res.sort_index(ascending=True, inplace=True)
+            res.dropna(inplace=True)
             res = res.round(2)
 
         return res

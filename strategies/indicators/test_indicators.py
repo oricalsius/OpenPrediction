@@ -1,4 +1,4 @@
-from .definitions import moving_average
+#from .definitions import moving_average
 
 def test_get_ticker_history():
     #result = asyncio.run(api_rest.get_ticker_history("btcusdt", TickerPeriod.Hour4, 10, TickerSchema(many=True,
